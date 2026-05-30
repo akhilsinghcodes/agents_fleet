@@ -66,6 +66,17 @@ export function getDb(): Db {
 
     CREATE INDEX IF NOT EXISTS idx_stdin_events_session_ts
       ON stdin_events(session_id, timestamp);
+
+    -- Markers to support replay UX (e.g. freeze before exit cleanup)
+    CREATE TABLE IF NOT EXISTS session_markers (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      kind TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_markers_session_ts
+      ON session_markers(session_id, timestamp);
   `);
 
   // Migrations (sessions columns)

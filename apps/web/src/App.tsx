@@ -330,6 +330,7 @@ export default function App() {
               <TerminalReplay
                 sessionId={selectedId}
                 active={centerTab === "logs"}
+                freezeAtExit={selected?.command.trim() === "claude"}
               />
             ) : null}
           </div>

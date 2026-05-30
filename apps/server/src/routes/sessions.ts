@@ -193,7 +193,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
   });
 
   /**
-   * GET /api/sessions/:id/pty?limit=...&offset=...
+   * GET /api/sessions/:id/pty?limit=...&offset=...&before=ISO_TIMESTAMP
    * Response: { chunks: Array<{ id: string; session_id: string; timestamp: string; data: string }>, limit: number, offset: number }
    */
   router.get("/sessions/:id/pty", (req, res) => {
@@ -205,16 +205,19 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     if (!exists) return jsonError(res, 404, "Session not found");
 
     const { limit, offset } = parseLimitOffset(req);
+    const before =
+      typeof req.query.before === "string" ? req.query.before : null;
 
     const chunks = db
       .prepare(
         `SELECT id, session_id, timestamp, data
          FROM pty_chunks
          WHERE session_id = ?
+           AND (? IS NULL OR timestamp <= ?)
          ORDER BY timestamp ASC, id ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(id, limit, offset) as Array<{
+      .all(id, before, before, limit, offset) as Array<{
       id: string;
       session_id: string;
       timestamp: string;
@@ -222,6 +225,35 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     }>;
 
     res.json({ chunks, limit, offset });
+  });
+
+  /**
+   * GET /api/sessions/:id/markers
+   * Response: { markers: Array<{ id: string; session_id: string; timestamp: string; kind: string }> }
+   */
+  router.get("/sessions/:id/markers", (req, res) => {
+    const db = getDb();
+    const id = req.params.id;
+    const exists = db
+      .prepare("SELECT 1 FROM sessions WHERE id = ? LIMIT 1")
+      .get(id);
+    if (!exists) return jsonError(res, 404, "Session not found");
+
+    const markers = db
+      .prepare(
+        `SELECT id, session_id, timestamp, kind
+         FROM session_markers
+         WHERE session_id = ?
+         ORDER BY timestamp ASC, id ASC`,
+      )
+      .all(id) as Array<{
+      id: string;
+      session_id: string;
+      timestamp: string;
+      kind: string;
+    }>;
+
+    res.json({ markers });
   });
 
   return router;
