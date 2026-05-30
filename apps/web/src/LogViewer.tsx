@@ -45,7 +45,9 @@ export default function LogViewer({ logs, maxLines = 2000 }: Props) {
     <div
       ref={containerRef}
       style={{
-        whiteSpace: "pre",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         fontSize: 12,

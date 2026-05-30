@@ -70,7 +70,7 @@ export async function getLogs(args: {
   const res = await fetch(
     `/api/sessions/${encodeURIComponent(args.sessionId)}/logs?limit=${encodeURIComponent(
       limit,
-    )}&offset=${encodeURIComponent(offset)}`,
+    )}&offset=${encodeURIComponent(offset)}&format=clean`,
   );
   const json = await parseJson<
     { logs: LogRow[]; limit: number; offset: number } | ApiErrorShape

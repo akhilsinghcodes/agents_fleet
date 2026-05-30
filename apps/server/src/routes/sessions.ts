@@ -7,6 +7,7 @@ import type {
   Session,
   LogRow,
 } from "@agents_fleet/shared";
+import stripAnsi from "strip-ansi";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
 
@@ -197,7 +198,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
   });
 
   /**
-   * GET /api/sessions/:id/logs?limit=...&offset=...
+   * GET /api/sessions/:id/logs?limit=...&offset=...&format=clean|raw
    * Response: { logs: LogRow[], limit: number, offset: number }
    */
   router.get("/sessions/:id/logs", (req, res) => {
@@ -209,6 +210,11 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     if (!exists) return jsonError(res, 404, "Session not found");
 
     const { limit, offset } = parseLimitOffset(req);
+
+    const format =
+      typeof req.query.format === "string" ? req.query.format : "clean";
+    const clean = format !== "raw";
+
     const logs = db
       .prepare(
         `SELECT id, session_id, timestamp, stream, message
@@ -219,7 +225,20 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       )
       .all(id, limit, offset) as LogRow[];
 
-    res.json({ logs, limit, offset });
+    const normalized = clean
+      ? logs.map((l) => ({
+          ...l,
+          // Make persisted history readable:
+          // - strip ANSI escape sequences
+          // - normalize CRLF
+          // - handle carriage returns from TUI/progress output by turning them into newlines
+          message: stripAnsi(l.message)
+            .replaceAll("\r\n", "\n")
+            .replaceAll("\r", "\n"),
+        }))
+      : logs;
+
+    res.json({ logs: normalized, limit, offset });
   });
 
   return router;
