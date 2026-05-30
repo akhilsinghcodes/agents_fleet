@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.vite/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Local env
+.env
+.env.*
+.envrc
+
+# Corepack cache (repo-local)
+.corepack/
+
+# SQLite (local runtime data)
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Test/artifact outputs
+coverage/
+playwright-report/
+test-results/
+
+# Optional: keep large local demo videos out of git history
+screenshots/*.mov
