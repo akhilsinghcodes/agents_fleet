@@ -106,14 +106,50 @@ export class SessionWsHub {
     // Audit log for stdin (do not count tokens from this log line).
     void (async () => {
       await pm.recordInputAndCount(sessionId, data);
-      const trimmed = data.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
-      const msg = trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed;
+
       const timestamp = new Date().toISOString();
       const id = cryptoRandomId();
       const db = getDb();
+
+      // Persist raw input (bounded) for audit without injecting into terminal replay.
+      const trimmed = data.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+      const msg = trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed;
       db.prepare(
         "INSERT INTO stdin_events (id, session_id, timestamp, data) VALUES (?, ?, ?, ?)",
       ).run(id, sessionId, timestamp, msg);
+
+      // Mark likely "exit triggers" so the UI can freeze replay before TUI cleanup.
+      // Heuristics:
+      // - Enter key ends a command line (data contains \r or \n)
+      // - Ctrl+C is \x03
+      const session = (
+        db
+          .prepare("SELECT command FROM sessions WHERE id = ?")
+          .get(sessionId) as { command: string } | undefined
+      )?.command;
+
+      const isClaude =
+        typeof session === "string" && session.trim() === "claude";
+      if (!isClaude) return;
+
+      // Track the current line in a simple per-session buffer table in-memory would be better,
+      // but for MVP we approximate: mark on Enter if the payload includes "/exit".
+      if (
+        (data.includes("\r") || data.includes("\n")) &&
+        data.includes("/exit")
+      ) {
+        const mid = cryptoRandomId();
+        db.prepare(
+          "INSERT INTO session_markers (id, session_id, timestamp, kind) VALUES (?, ?, ?, ?)",
+        ).run(mid, sessionId, timestamp, "user_exit");
+      }
+
+      if (data.includes("\x03")) {
+        const mid = cryptoRandomId();
+        db.prepare(
+          "INSERT INTO session_markers (id, session_id, timestamp, kind) VALUES (?, ?, ?, ?)",
+        ).run(mid, sessionId, timestamp, "user_interrupt");
+      }
     })();
   }
 

@@ -9,12 +9,50 @@ type Chunk = {
   data: string;
 };
 
+type Marker = {
+  id: string;
+  session_id: string;
+  timestamp: string;
+  kind: string;
+};
+
 type Props = {
   sessionId: string;
   active: boolean;
+  freezeAtExit?: boolean;
 };
 
-export default function TerminalReplay({ sessionId, active }: Props) {
+async function fetchMarkers(sessionId: string, signal?: AbortSignal) {
+  const res = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/markers`,
+    signal ? { signal } : undefined,
+  );
+  if (!res.ok) throw new Error(`Failed to load markers (${res.status})`);
+  const json = (await res.json()) as { markers: Marker[] };
+  return json.markers;
+}
+
+function pickFreezeTimestamp(markers: Marker[]): string | null {
+  // Prefer user-intent markers; otherwise fall back to stop/process exit.
+  const priority = [
+    "user_exit",
+    "stop_requested",
+    "budget_exceeded",
+    "user_interrupt",
+    "process_exit",
+  ];
+  for (const k of priority) {
+    const m = markers.find((x) => x.kind === k);
+    if (m) return m.timestamp;
+  }
+  return null;
+}
+
+export default function TerminalReplay({
+  sessionId,
+  active,
+  freezeAtExit = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -96,11 +134,18 @@ export default function TerminalReplay({ sessionId, active }: Props) {
         // (xterm will ignore this visually if the app switches to alt screen)
         // term.writeln(`[replay] loading PTY chunks...`);
 
+        const before = freezeAtExit
+          ? pickFreezeTimestamp(await fetchMarkers(sessionId, ac.signal))
+          : null;
+
         while (!cancelled) {
-          const res = await fetch(
+          const url = new URL(
             `/api/sessions/${encodeURIComponent(sessionId)}/pty?limit=${limit}&offset=${offset}`,
-            { signal: ac.signal },
+            window.location.origin,
           );
+          if (before) url.searchParams.set("before", before);
+
+          const res = await fetch(url.toString(), { signal: ac.signal });
           if (!res.ok)
             throw new Error(`Failed to load PTY history (${res.status})`);
           const json = (await res.json()) as {
@@ -109,7 +154,14 @@ export default function TerminalReplay({ sessionId, active }: Props) {
             offset: number;
           };
 
-          for (const c of json.chunks) term.write(c.data);
+          for (const c of json.chunks) {
+            term.write(c.data);
+            if (c.data.includes("\x1b[?1049l")) {
+              // The app left alt-screen (common on exit). To keep the TUI history visible,
+              // immediately re-enter alt-screen for the remainder of the replay.
+              term.write("\x1b[?1049h");
+            }
+          }
 
           if (json.chunks.length < limit) break;
           offset += limit;

@@ -24,6 +24,16 @@ function nowIso() {
 
 const PTY_FLUSH_MS = 50;
 
+function insertMarker(sessionId: string, kind: string) {
+  const timestamp = nowIso();
+  const id = crypto.randomUUID();
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO session_markers (id, session_id, timestamp, kind) VALUES (?, ?, ?, ?)",
+  ).run(id, sessionId, timestamp, kind);
+  return { id, session_id: sessionId, timestamp, kind } as const;
+}
+
 function insertPtyChunk(sessionId: string, data: string) {
   const timestamp = nowIso();
   const id = crypto.randomUUID();
@@ -219,6 +229,7 @@ export class ProcessManager {
         const message = `process exit: code=${exitCode ?? "null"} signal=${signal ?? "null"}`;
         // Flush any buffered PTY data before we record exit.
         this.flushPty(args.sessionId);
+        insertMarker(args.sessionId, "process_exit");
         insertPtyChunk(args.sessionId, `\r\n[system] ${message}\r\n`);
         const updated = await updateSessionFields(args.sessionId, {
           status,
@@ -244,6 +255,7 @@ export class ProcessManager {
     if (updated) this.hub.broadcastSession(updated);
     // Ensure any buffered output is persisted before we stop.
     this.flushPty(sessionId);
+    insertMarker(sessionId, "stop_requested");
     insertPtyChunk(sessionId, "\r\n[system] stop requested\r\n");
 
     try {
@@ -310,6 +322,7 @@ export class ProcessManager {
     if (!tokenExceeded && !usdExceeded) return;
 
     const now = nowIso();
+    insertMarker(sessionId, "budget_exceeded");
     insertPtyChunk(
       sessionId,
       `\r\n[system] Budget exceeded; stopping session. tokens=${totalTokens} cost_usd=${session.estimated_cost_usd.toFixed(
