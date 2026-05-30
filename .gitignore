@@ -35,6 +35,14 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
+# SQLite anywhere (in case DBs are created in other folders)
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
 # Test/artifact outputs
 coverage/
 playwright-report/
