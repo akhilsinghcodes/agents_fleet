@@ -1,7 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type {
   Session,
-  LogStream,
   WsClientMessage,
   WsServerMessage,
 } from "@agents_fleet/shared";
@@ -113,14 +112,8 @@ export class SessionWsHub {
       const id = cryptoRandomId();
       const db = getDb();
       db.prepare(
-        "INSERT INTO logs (id, session_id, timestamp, stream, message) VALUES (?, ?, ?, ?, ?)",
-      ).run(id, sessionId, timestamp, "system", `stdin: ${msg}`);
-      this.broadcastLog({
-        sessionId,
-        timestamp,
-        stream: "system",
-        message: `stdin: ${msg}`,
-      });
+        "INSERT INTO stdin_events (id, session_id, timestamp, data) VALUES (?, ?, ?, ?)",
+      ).run(id, sessionId, timestamp, msg);
     })();
   }
 
@@ -152,19 +145,6 @@ export class SessionWsHub {
   private cleanupClient(ws: WebSocket) {
     this.unsubscribe(ws);
     this.clientToSession.delete(ws);
-  }
-
-  broadcastLog(args: {
-    sessionId: string;
-    timestamp: string;
-    stream: LogStream;
-    message: string;
-  }) {
-    const clients = this.sessionToClients.get(args.sessionId);
-    if (!clients) return;
-    for (const ws of clients) {
-      safeSend(ws, { type: "log", ...args });
-    }
   }
 
   broadcastPty(args: { sessionId: string; data: string }) {

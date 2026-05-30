@@ -45,16 +45,27 @@ export function getDb(): Db {
       ended_at TEXT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS logs (
+    -- Terminal replay data (raw PTY stream chunks)
+    CREATE TABLE IF NOT EXISTS pty_chunks (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
       timestamp TEXT NOT NULL,
-      stream TEXT NOT NULL,
-      message TEXT NOT NULL
+      data TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_logs_session_ts
-      ON logs(session_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_pty_chunks_session_ts
+      ON pty_chunks(session_id, timestamp);
+
+    -- Optional audit trail for user input (not injected into terminal replay)
+    CREATE TABLE IF NOT EXISTS stdin_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stdin_events_session_ts
+      ON stdin_events(session_id, timestamp);
   `);
 
   // Migrations (sessions columns)

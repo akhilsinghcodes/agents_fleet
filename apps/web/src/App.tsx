@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { LogRow, Session } from "@agents_fleet/shared";
-import { createSession, getLogs, listSessions, stopSession } from "./api";
+import type { Session } from "@agents_fleet/shared";
+import { createSession, listSessions, stopSession } from "./api";
 import { openWs, type WsServerMessage } from "./ws";
-import LogViewer from "./LogViewer";
+
 import TerminalPane from "./TerminalPane";
+import TerminalReplay from "./TerminalReplay";
 
 export default function App() {
   const [repoPath, setRepoPath] = useState("");
@@ -19,7 +20,6 @@ export default function App() {
     [sessions, selectedId],
   );
 
-  const [logs, setLogs] = useState<LogRow[]>([]);
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [centerTab, setCenterTab] = useState<"terminal" | "logs">("terminal");
 
@@ -42,23 +42,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedId) {
-      setLogs([]);
       if (ws) ws.close();
       setWs(null);
       return;
     }
 
-    let cancelled = false;
-    setLogs([]);
     setError(null);
-
-    getLogs({ sessionId: selectedId, limit: 500, offset: 0 })
-      .then((r) => {
-        if (!cancelled) setLogs(r.logs);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
 
     const socket = openWs();
     setWs(socket);
@@ -79,19 +68,6 @@ export default function App() {
         );
         return;
       }
-      if (msg.type === "log" && msg.sessionId === selectedId) {
-        setLogs((prev) => [
-          ...prev,
-          {
-            id: `live-${prev.length}-${msg.timestamp}`,
-            session_id: msg.sessionId,
-            timestamp: msg.timestamp,
-            stream: msg.stream,
-            message: msg.message,
-          },
-        ]);
-        return;
-      }
       if (msg.type === "session") {
         setSessions((prev) =>
           prev.map((s) => (s.id === msg.session.id ? msg.session : s)),
@@ -101,7 +77,6 @@ export default function App() {
     socket.onerror = () => setError("WebSocket error");
 
     return () => {
-      cancelled = true;
       socket.close();
       setWs(null);
     };
@@ -340,7 +315,7 @@ export default function App() {
                 fontSize: 12,
               }}
             >
-              Logs (persisted)
+              Terminal (persisted)
             </button>
           </div>
 
@@ -351,9 +326,12 @@ export default function App() {
                 ws={ws}
                 active={centerTab === "terminal"}
               />
-            ) : (
-              <LogViewer logs={logs} />
-            )}
+            ) : selectedId ? (
+              <TerminalReplay
+                sessionId={selectedId}
+                active={centerTab === "logs"}
+              />
+            ) : null}
           </div>
         </div>
       </section>

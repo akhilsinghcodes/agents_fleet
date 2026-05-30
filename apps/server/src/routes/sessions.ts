@@ -2,12 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Request, Response, Router } from "express";
 import { Router as createRouter } from "express";
-import type {
-  CreateSessionRequest,
-  Session,
-  LogRow,
-} from "@agents_fleet/shared";
-import stripAnsi from "strip-ansi";
+import type { CreateSessionRequest, Session } from "@agents_fleet/shared";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
 
@@ -198,10 +193,10 @@ export function sessionsRouter(processManager: ProcessManager): Router {
   });
 
   /**
-   * GET /api/sessions/:id/logs?limit=...&offset=...&format=clean|raw
-   * Response: { logs: LogRow[], limit: number, offset: number }
+   * GET /api/sessions/:id/pty?limit=...&offset=...
+   * Response: { chunks: Array<{ id: string; session_id: string; timestamp: string; data: string }>, limit: number, offset: number }
    */
-  router.get("/sessions/:id/logs", (req, res) => {
+  router.get("/sessions/:id/pty", (req, res) => {
     const db = getDb();
     const id = req.params.id;
     const exists = db
@@ -211,34 +206,22 @@ export function sessionsRouter(processManager: ProcessManager): Router {
 
     const { limit, offset } = parseLimitOffset(req);
 
-    const format =
-      typeof req.query.format === "string" ? req.query.format : "clean";
-    const clean = format !== "raw";
-
-    const logs = db
+    const chunks = db
       .prepare(
-        `SELECT id, session_id, timestamp, stream, message
-         FROM logs
+        `SELECT id, session_id, timestamp, data
+         FROM pty_chunks
          WHERE session_id = ?
          ORDER BY timestamp ASC, id ASC
          LIMIT ? OFFSET ?`,
       )
-      .all(id, limit, offset) as LogRow[];
+      .all(id, limit, offset) as Array<{
+      id: string;
+      session_id: string;
+      timestamp: string;
+      data: string;
+    }>;
 
-    const normalized = clean
-      ? logs.map((l) => ({
-          ...l,
-          // Make persisted history readable:
-          // - strip ANSI escape sequences
-          // - normalize CRLF
-          // - handle carriage returns from TUI/progress output by turning them into newlines
-          message: stripAnsi(l.message)
-            .replaceAll("\r\n", "\n")
-            .replaceAll("\r", "\n"),
-        }))
-      : logs;
-
-    res.json({ logs: normalized, limit, offset });
+    res.json({ chunks, limit, offset });
   });
 
   return router;

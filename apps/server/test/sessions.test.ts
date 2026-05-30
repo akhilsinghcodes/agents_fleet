@@ -16,7 +16,7 @@ async function waitFor(
   intervalMs = 50,
 ) {
   const start = Date.now();
-   
+
   while (true) {
     if (await fn()) return;
     if (Date.now() - start > timeoutMs) {
@@ -55,11 +55,11 @@ describe("sessions API", () => {
     const sessionId = createRes.body.session.id as string;
 
     await waitFor(async () => {
-      const logsRes = await request(app).get(
-        `/api/sessions/${encodeURIComponent(sessionId)}/logs?limit=500&offset=0`,
+      const ptyRes = await request(app).get(
+        `/api/sessions/${encodeURIComponent(sessionId)}/pty?limit=500&offset=0`,
       );
-      const logs = (logsRes.body.logs ?? []) as Array<{ message: string }>;
-      return logs.some((l) => l.message.includes("hello"));
+      const chunks = (ptyRes.body.chunks ?? []) as Array<{ data: string }>;
+      return chunks.some((c) => c.data.includes("hello"));
     });
   });
 
@@ -74,11 +74,11 @@ describe("sessions API", () => {
     const sessionId = createRes.body.session.id as string;
 
     await waitFor(async () => {
-      const logsRes = await request(app).get(
-        `/api/sessions/${encodeURIComponent(sessionId)}/logs?limit=500&offset=0`,
+      const ptyRes = await request(app).get(
+        `/api/sessions/${encodeURIComponent(sessionId)}/pty?limit=500&offset=0`,
       );
-      const logs = (logsRes.body.logs ?? []) as Array<{ message: string }>;
-      return logs.some((l) => l.message.includes("tick"));
+      const chunks = (ptyRes.body.chunks ?? []) as Array<{ data: string }>;
+      return chunks.some((c) => c.data.includes("tick"));
     });
 
     const stopRes = await request(app).post(

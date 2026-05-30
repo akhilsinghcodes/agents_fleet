@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import os from "node:os";
-import type { LogStream, Session, SessionStatus } from "@agents_fleet/shared";
+import type { Session, SessionStatus } from "@agents_fleet/shared";
 import pty, { type IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import { getDb } from "./db";
 import { computeCostUsd, estimateTokens } from "./budget";
@@ -12,20 +12,26 @@ type RunningSession = {
   rows: number;
   repoPath: string;
   command: string;
+
+  // PTY persistence buffering (avoid DB write per chunk)
+  ptyBuffer: string;
+  ptyFlushTimer: NodeJS.Timeout | null;
 };
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-function insertLog(sessionId: string, stream: LogStream, message: string) {
+const PTY_FLUSH_MS = 50;
+
+function insertPtyChunk(sessionId: string, data: string) {
   const timestamp = nowIso();
   const id = crypto.randomUUID();
   const db = getDb();
   db.prepare(
-    "INSERT INTO logs (id, session_id, timestamp, stream, message) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, sessionId, timestamp, stream, message);
-  return { id, session_id: sessionId, timestamp, stream, message } as const;
+    "INSERT INTO pty_chunks (id, session_id, timestamp, data) VALUES (?, ?, ?, ?)",
+  ).run(id, sessionId, timestamp, data);
+  return { id, session_id: sessionId, timestamp, data } as const;
 }
 
 async function getSession(sessionId: string): Promise<Session | null> {
@@ -94,48 +100,22 @@ async function updateSessionFields(
   return next;
 }
 
-function createLineEmitter(opts: {
-  sessionId: string;
-  stream: LogStream;
-  hub: SessionWsHub;
-  onTextForBudget?: (text: string) => void;
-}) {
-  let buffer = "";
-  const flushLine = (line: string) => {
-    if (line.length === 0) return;
-    opts.onTextForBudget?.(line);
-    const log = insertLog(opts.sessionId, opts.stream, line);
-    opts.hub.broadcastLog({
-      sessionId: opts.sessionId,
-      timestamp: log.timestamp,
-      stream: opts.stream,
-      message: line,
-    });
-  };
-
-  return {
-    onChunk(chunk: Buffer) {
-      buffer += chunk.toString("utf8");
-      let idx = buffer.indexOf("\n");
-      while (idx !== -1) {
-        const raw = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        const line = raw.replace(/\r$/, "");
-        flushLine(line);
-        idx = buffer.indexOf("\n");
-      }
-    },
-    flushRemainder() {
-      const remainder = buffer.trimEnd();
-      buffer = "";
-      if (remainder) flushLine(remainder);
-    },
-  };
-}
-
 export class ProcessManager {
   private readonly running = new Map<string, RunningSession>();
   constructor(private readonly hub: SessionWsHub) {}
+
+  private flushPty(sessionId: string) {
+    const r = this.running.get(sessionId);
+    if (!r) return;
+    if (r.ptyFlushTimer) {
+      clearTimeout(r.ptyFlushTimer);
+      r.ptyFlushTimer = null;
+    }
+    const buf = r.ptyBuffer;
+    r.ptyBuffer = "";
+    if (!buf) return;
+    insertPtyChunk(sessionId, buf);
+  }
 
   isRunning(sessionId: string) {
     return this.running.has(sessionId);
@@ -180,6 +160,8 @@ export class ProcessManager {
       rows,
       repoPath: args.repoPath,
       command: args.command,
+      ptyBuffer: "",
+      ptyFlushTimer: null,
     });
 
     void (async () => {
@@ -205,21 +187,27 @@ export class ProcessManager {
       void this.enforceBudget(args.sessionId, updated ?? session);
     };
 
-    // PTY merges stdout/stderr; store as stdout.
-    const stdoutEmitter = createLineEmitter({
-      sessionId: args.sessionId,
-      stream: "stdout",
-      hub: this.hub,
-      onTextForBudget: (t) => void handleOutputText(t),
-    });
-
     p.onData((data) => {
       this.hub.broadcastPty({ sessionId: args.sessionId, data });
-      stdoutEmitter.onChunk(Buffer.from(data, "utf8"));
+
+      const r = this.running.get(args.sessionId);
+      if (r) {
+        r.ptyBuffer += data;
+        if (!r.ptyFlushTimer) {
+          r.ptyFlushTimer = setTimeout(
+            () => this.flushPty(args.sessionId),
+            PTY_FLUSH_MS,
+          );
+        }
+      }
+
+      // Budget estimation is best-effort; count from the raw stream.
+      void handleOutputText(data);
     });
 
     p.onExit(({ exitCode, signal }) => {
-      stdoutEmitter.flushRemainder();
+      // Flush any buffered PTY data before we finalize the session.
+      this.flushPty(args.sessionId);
       void (async () => {
         const current = await getSession(args.sessionId);
         const wasStopped = current?.status === "stopped";
@@ -229,7 +217,9 @@ export class ProcessManager {
             ? "exited"
             : "error";
         const message = `process exit: code=${exitCode ?? "null"} signal=${signal ?? "null"}`;
-        insertLog(args.sessionId, "system", message);
+        // Flush any buffered PTY data before we record exit.
+        this.flushPty(args.sessionId);
+        insertPtyChunk(args.sessionId, `\r\n[system] ${message}\r\n`);
         const updated = await updateSessionFields(args.sessionId, {
           status,
           exit_code: exitCode ?? null,
@@ -252,7 +242,9 @@ export class ProcessManager {
       stop_reason: reason,
     });
     if (updated) this.hub.broadcastSession(updated);
-    insertLog(sessionId, "system", "stop requested");
+    // Ensure any buffered output is persisted before we stop.
+    this.flushPty(sessionId);
+    insertPtyChunk(sessionId, "\r\n[system] stop requested\r\n");
 
     try {
       running.pty.kill();
@@ -318,12 +310,11 @@ export class ProcessManager {
     if (!tokenExceeded && !usdExceeded) return;
 
     const now = nowIso();
-    insertLog(
+    insertPtyChunk(
       sessionId,
-      "system",
-      `Budget exceeded; stopping session. tokens=${totalTokens} cost_usd=${session.estimated_cost_usd.toFixed(
+      `\r\n[system] Budget exceeded; stopping session. tokens=${totalTokens} cost_usd=${session.estimated_cost_usd.toFixed(
         6,
-      )}`,
+      )}\r\n`,
     );
     const updated = await updateSessionFields(sessionId, {
       status: "stopped",
