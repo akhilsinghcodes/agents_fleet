@@ -7,8 +7,8 @@ This repository contains a **working MVP**:
 - React + Vite + TypeScript “Mission Control” web app
 - Node + Express + TypeScript server:
   - SQLite persistence (`data/agents_fleet.sqlite`)
-  - session + logs HTTP APIs
-  - WebSocket live log streaming (`/ws`)
+  - session + terminal history HTTP APIs
+  - WebSocket live PTY streaming (`/ws`)
 - shared TypeScript types (`packages/shared`)
 
 ## Demo
@@ -29,13 +29,13 @@ This repository contains a **working MVP**:
 
 ![Codex interactive session](screenshots/codex.png)
 
-**Live output vs persisted logs**
+**Live output vs persisted terminal history**
 
 - Terminal (live)
 
 ![git status live](screenshots/git_status_live.png)
 
-- Logs (persisted)
+- Terminal (persisted)
 
 ![git status persisted logs](screenshots/git_status_logs.png)
 
@@ -57,7 +57,14 @@ This repository contains a **working MVP**:
 
 ![sessions table](screenshots/session_table.png)
 
-![logs table](screenshots/logs_table.png)
+The MVP persists several tables in `data/agents_fleet.sqlite`:
+
+- `sessions`: session metadata + budgets + estimated token/cost + stop reason
+- `pty_chunks`: raw PTY stream (ANSI included) used for **Terminal (persisted)** replay
+- `stdin_events`: input audit trail (stored separately; not injected into replay)
+- `session_markers`: lifecycle markers like `stop_requested`, `budget_exceeded`, `process_exit`
+
+> Earlier iterations used a line-based `logs` table. The current design persists terminal history as raw PTY chunks (`pty_chunks`) for xterm.js replay, which is much closer to real scrollback (especially for TUIs like Claude/Codex).
 
 ### Videos
 
@@ -98,6 +105,7 @@ Example commands:
 ```bash
 node -e "console.log('hello')"
 git status
+node -e "setinterval(()=>console.log('tick',Date.now()),200)"
 node -e "setInterval(()=>console.log(Date.now()),200)"
 claude
 codex
@@ -105,7 +113,8 @@ codex
 
 ## Interactive sessions (e.g. Claude)
 - Start a session with command `claude` (or `codex` if installed).
-- Type directly into the **Terminal (live)** pane (xterm.js). Persisted logs are still available in the Logs tab.
+- Type directly into the **Terminal (live)** pane (xterm.js).
+- Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.
@@ -133,6 +142,6 @@ COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server test
 - SQLite DB: `data/agents_fleet.sqlite` (local only; do not commit).
 
 ## Known limitations
-- Interactive terminal output is **live-only** in the xterm view; persisted logs are line-based and not a perfect replay of full-screen TUIs.
 - PTY sessions do not preserve stdout/stderr separation.
 - Token/cost is an estimate unless the CLI provides actual usage.
+- Some TUIs (notably Claude) may clear/restore the alternate screen on exit. The persisted replay is a faithful stream replay, so end-of-session scrollback may differ from what you remember seeing just before exit.
