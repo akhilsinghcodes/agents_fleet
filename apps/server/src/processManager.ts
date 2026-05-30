@@ -4,6 +4,7 @@ import type { Session, SessionStatus } from "@agents_fleet/shared";
 import pty, { type IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import { getDb } from "./db";
 import { computeCostUsd, estimateTokens } from "./budget";
+import stripAnsi from "strip-ansi";
 import type { SessionWsHub } from "./ws";
 
 type RunningSession = {
@@ -183,7 +184,10 @@ export class ProcessManager {
     })();
 
     const handleOutputText = async (text: string) => {
-      const outputTokens = estimateTokens(text);
+      // PTY streams include ANSI escape codes (colors, cursor moves, clears) which can wildly
+      // inflate token estimates and trigger budgets prematurely. Strip them before estimating.
+      const clean = stripAnsi(text);
+      const outputTokens = estimateTokens(clean);
       if (outputTokens <= 0) return;
       const session = await getSession(args.sessionId);
       if (!session) return;
