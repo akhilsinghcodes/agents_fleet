@@ -8,9 +8,9 @@
 - Budget accuracy hardening: strip ANSI escape sequences before token estimation (done).
 
 ## Next (Agent mission control)
-- Capture git diff + changed files per session (optional on stop / on exit) and store as a per-session artifact.
+- Capture git diff + changed files per session (optional on stop / on exit) and store as a per-session artifact. (done: stored in `session_artifacts`, viewable in UI)
 - One-click rerun: restart a historical session (repoPath + command) in a fresh process.
-- Per-session artifacts UX: view/export bundle (diff, changed files list, PTY replay export).
+- Per-session artifacts UX: view/export bundle (diff, changed files list, PTY replay export). (in progress: artifacts tab + JSON diff view)
 - Model-based cost profiles and parsing “actual usage” when CLIs expose it.
 
 ## Later
@@ -19,4 +19,4 @@
 - Approvals / policy gates for risky commands (local-only).
 - Team/shared workspaces (still local-first, optional sync later).
 - Optional local proxy mode for exact budget enforcement and richer telemetry.
-
+hi

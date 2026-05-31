@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import type { Request, Response, Router } from "express";
 import { Router as createRouter } from "express";
-import type { CreateSessionRequest, Session } from "@agents_fleet/shared";
+import type {
+  CreateSessionRequest,
+  Session,
+  SessionArtifact,
+} from "@agents_fleet/shared";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
 
@@ -254,6 +258,53 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     }>;
 
     res.json({ markers });
+  });
+
+  /**
+   * GET /api/sessions/:id/artifacts?limit=...&offset=...&kind=...&latest=1
+   * Response: { artifacts: SessionArtifact[], limit: number, offset: number }
+   */
+  router.get("/sessions/:id/artifacts", (req, res) => {
+    const db = getDb();
+    const id = req.params.id;
+    const exists = db
+      .prepare("SELECT 1 FROM sessions WHERE id = ? LIMIT 1")
+      .get(id);
+    if (!exists) return jsonError(res, 404, "Session not found");
+
+    const { limit, offset } = parseLimitOffset(req);
+    const kind = typeof req.query.kind === "string" ? req.query.kind : null;
+    const latest =
+      typeof req.query.latest === "string"
+        ? req.query.latest === "1" || req.query.latest.toLowerCase() === "true"
+        : false;
+
+    if (latest) {
+      const row = db
+        .prepare(
+          `SELECT id, session_id, timestamp, kind, content
+           FROM session_artifacts
+           WHERE session_id = ?
+             AND (? IS NULL OR kind = ?)
+           ORDER BY timestamp DESC, id DESC
+           LIMIT 1`,
+        )
+        .get(id, kind, kind) as SessionArtifact | undefined;
+      return res.json({ artifacts: row ? [row] : [], limit: 1, offset: 0 });
+    }
+
+    const artifacts = db
+      .prepare(
+        `SELECT id, session_id, timestamp, kind, content
+         FROM session_artifacts
+         WHERE session_id = ?
+           AND (? IS NULL OR kind = ?)
+         ORDER BY timestamp ASC, id ASC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(id, kind, kind, limit, offset) as SessionArtifact[];
+
+    return res.json({ artifacts, limit, offset });
   });
 
   return router;
