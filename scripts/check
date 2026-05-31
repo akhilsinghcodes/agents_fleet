@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+set -eu
+
+# Contributor-friendly "one command" check: lint + typecheck + test + build.
+
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$REPO_ROOT"
+
+COREPACK_HOME="$REPO_ROOT/.corepack"
+export COREPACK_HOME
+
+if command -v corepack >/dev/null 2>&1; then
+  corepack enable >/dev/null 2>&1 || true
+fi
+
+if [ ! -d "$REPO_ROOT/node_modules" ]; then
+  echo "[agents_fleet] Installing dependencies (pnpm install)…"
+  pnpm install
+fi
+
+echo "[agents_fleet] Running lint…"
+pnpm lint
+
+echo "[agents_fleet] Running typecheck…"
+pnpm typecheck
+
+echo "[agents_fleet] Running tests…"
+pnpm -r test
+
+echo "[agents_fleet] Building…"
+pnpm build
+
+echo "[agents_fleet] OK"
