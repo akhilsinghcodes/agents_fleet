@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml)
 
+AI coding agents like Claude Code and Codex are powerful, but they have no built-in cost controls—one runaway session can silently burn $20–$50 with no visibility into what’s happening or when to stop. Agents Fleet gives you a local web UI to launch and monitor agent sessions and automatically stop them when they hit a token or USD budget.
+
 Local-first “mission control” for AI coding agent CLIs (and any shell commands): launch sessions in a repo, stream live output to a web UI, stop them, and keep a persisted history.
 
 This repository contains a **working MVP**:
