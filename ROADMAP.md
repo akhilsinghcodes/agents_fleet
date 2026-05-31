@@ -19,4 +19,3 @@
 - Approvals / policy gates for risky commands (local-only).
 - Team/shared workspaces (still local-first, optional sync later).
 - Optional local proxy mode for exact budget enforcement and richer telemetry.
-hi
