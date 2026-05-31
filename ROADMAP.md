@@ -6,9 +6,9 @@
 - Harden crash recovery: detect orphaned running sessions and mark them ended on server start.
 - Better error surfaces in UI (spawn failures, invalid repo paths, budget stops).
 - Budget accuracy hardening: strip ANSI escape sequences before token estimation (done).
+- Capture git diff + changed files per session (optional on stop / on exit) and store as a per-session artifact. (done: stored in `session_artifacts`, viewable in UI)
 
 ## Next (Agent mission control)
-- Capture git diff + changed files per session (optional on stop / on exit) and store as a per-session artifact. (done: stored in `session_artifacts`, viewable in UI)
 - One-click rerun: restart a historical session (repoPath + command) in a fresh process.
 - Per-session artifacts UX: view/export bundle (diff, changed files list, PTY replay export). (in progress: artifacts tab + JSON diff view)
 - Model-based cost profiles and parsing “actual usage” when CLIs expose it.
