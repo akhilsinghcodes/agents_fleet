@@ -5,6 +5,7 @@ import { openWs, type WsServerMessage } from "./ws";
 
 import TerminalPane from "./TerminalPane";
 import TerminalReplay from "./TerminalReplay";
+import SessionArtifacts from "./SessionArtifacts";
 
 export default function App() {
   const [repoPath, setRepoPath] = useState("");
@@ -21,7 +22,9 @@ export default function App() {
   );
 
   const [ws, setWs] = useState<WebSocket | null>(null);
-  const [centerTab, setCenterTab] = useState<"terminal" | "logs">("terminal");
+  const [centerTab, setCenterTab] = useState<"terminal" | "logs" | "artifacts">(
+    "terminal",
+  );
 
   async function refreshSessions(preserveSelected = true) {
     const next = await listSessions();
@@ -102,7 +105,7 @@ export default function App() {
       setBudgetTokens("");
       await refreshSessions(false);
       setSelectedId(session.id);
-      setCenterTab("terminal");
+      setCenterTab("artifacts");
     } catch (err) {
       setError(String(err));
     }
@@ -317,6 +320,22 @@ export default function App() {
             >
               Terminal (persisted)
             </button>
+            <button
+              onClick={() => setCenterTab("artifacts")}
+              disabled={!selectedId}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+                background: centerTab === "artifacts" ? "#111827" : "white",
+                color: centerTab === "artifacts" ? "white" : "#111827",
+                cursor: selectedId ? "pointer" : "not-allowed",
+                fontSize: 12,
+                opacity: selectedId ? 1 : 0.5,
+              }}
+            >
+              Artifacts
+            </button>
           </div>
 
           <div style={{ minHeight: 0 }}>
@@ -326,12 +345,26 @@ export default function App() {
                 ws={ws}
                 active={centerTab === "terminal"}
               />
-            ) : selectedId ? (
+            ) : selectedId && centerTab === "logs" ? (
               <TerminalReplay
                 sessionId={selectedId}
                 active={centerTab === "logs"}
                 freezeAtExit={selected?.command.trim() === "claude"}
               />
+            ) : selectedId && centerTab === "artifacts" ? (
+              <div
+                style={{
+                  background: "white",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: 12,
+                  height: "100%",
+                  overflow: "auto",
+                  boxSizing: "border-box",
+                }}
+              >
+                <SessionArtifacts sessionId={selectedId} />
+              </div>
             ) : null}
           </div>
         </div>
@@ -353,7 +386,9 @@ export default function App() {
             return (
               <button
                 key={s.id}
-                onClick={() => setSelectedId(s.id)}
+                onClick={() => {
+                  setSelectedId(s.id);
+                }}
                 style={{
                   textAlign: "left",
                   padding: 10,

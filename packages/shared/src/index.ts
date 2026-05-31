@@ -28,6 +28,14 @@ export type LogRow = {
   message: string;
 };
 
+export type SessionArtifact = {
+  id: string;
+  session_id: string;
+  timestamp: string;
+  kind: string;
+  content: string;
+};
+
 export type CreateSessionRequest = {
   repoPath: string;
   command: string;

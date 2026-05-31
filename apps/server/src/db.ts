@@ -77,6 +77,18 @@ export function getDb(): Db {
 
     CREATE INDEX IF NOT EXISTS idx_session_markers_session_ts
       ON session_markers(session_id, timestamp);
+
+    -- Per-session artifacts (e.g. git diff snapshots)
+    CREATE TABLE IF NOT EXISTS session_artifacts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_artifacts_session_ts
+      ON session_artifacts(session_id, timestamp);
   `);
 
   // Migrations (sessions columns)

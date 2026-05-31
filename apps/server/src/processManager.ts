@@ -6,6 +6,11 @@ import { getDb } from "./db";
 import { computeCostUsd, estimateTokens } from "./budget";
 import stripAnsi from "strip-ansi";
 import type { SessionWsHub } from "./ws";
+import {
+  buildGitArtifactContent,
+  captureGitSnapshot,
+  storeSessionArtifact,
+} from "./gitArtifacts";
 
 type RunningSession = {
   pty: IPty;
@@ -21,6 +26,26 @@ type RunningSession = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function shouldCaptureGitOnEnd(): boolean {
+  // Opt-in by default. Set AGENTS_FLEET_CAPTURE_GIT_ON_END=0/false/no to disable.
+  const v = process.env.AGENTS_FLEET_CAPTURE_GIT_ON_END;
+  if (v == null) return true;
+  const s = v.trim().toLowerCase();
+  if (s === "0" || s === "false" || s === "no" || s === "off") return false;
+  return true;
+}
+
+function captureGitArtifactBestEffort(
+  sessionId: string,
+  repoPath: string,
+  kind: string,
+) {
+  if (!shouldCaptureGitOnEnd()) return;
+  const snap = captureGitSnapshot(repoPath);
+  const content = buildGitArtifactContent(snap);
+  storeSessionArtifact({ sessionId, kind, content });
 }
 
 const PTY_FLUSH_MS = 50;
@@ -235,12 +260,23 @@ export class ProcessManager {
         this.flushPty(args.sessionId);
         insertMarker(args.sessionId, "process_exit");
         insertPtyChunk(args.sessionId, `\r\n[system] ${message}\r\n`);
+        const endedAt = current?.ended_at ?? nowIso();
         const updated = await updateSessionFields(args.sessionId, {
           status,
           exit_code: exitCode ?? null,
-          ended_at: current?.ended_at ?? nowIso(),
+          ended_at: endedAt,
           stop_reason: current?.stop_reason ?? "process_exit",
         });
+        // Capture git state at end-of-session (best-effort).
+        try {
+          captureGitArtifactBestEffort(
+            args.sessionId,
+            args.repoPath,
+            "git_on_exit",
+          );
+        } catch {
+          // ignore
+        }
         if (updated) this.hub.broadcastSession(updated);
         this.running.delete(args.sessionId);
       })();
@@ -261,6 +297,13 @@ export class ProcessManager {
     this.flushPty(sessionId);
     insertMarker(sessionId, "stop_requested");
     insertPtyChunk(sessionId, "\r\n[system] stop requested\r\n");
+
+    // Capture git state when the user explicitly stops (best-effort).
+    try {
+      captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
+    } catch {
+      // ignore
+    }
 
     try {
       running.pty.kill();

@@ -33,6 +33,16 @@ This repository contains a **working MVP**:
 
 ![Codex interactive session](screenshots/codex.png)
 
+**Per-session artifacts (git diff snapshots)**
+
+- Artifacts tab (changed files + diff)
+
+![Artifacts view](screenshots/artifacts_git_snapshot_small.jpg)
+
+- Artifacts view (larger change set)
+
+![Artifacts view (large change)](screenshots/artifacts_git_snapshot_large.jpg)
+
 **Live output vs persisted terminal history**
 
 - Terminal (live)
@@ -67,6 +77,7 @@ The MVP persists several tables in `data/agents_fleet.sqlite`:
 - `pty_chunks`: raw PTY stream (ANSI included) used for **Terminal (persisted)** replay
 - `stdin_events`: input audit trail (stored separately; not injected into replay)
 - `session_markers`: lifecycle markers like `stop_requested`, `budget_exceeded`, `process_exit`
+- `session_artifacts`: per-session artifacts (currently: git snapshot with `changedFiles[]` + combined staged/unstaged `diff` captured on stop/exit)
 
 > Earlier iterations used a line-based `logs` table. The current design persists terminal history as raw PTY chunks (`pty_chunks`) for xterm.js replay, which is much closer to real scrollback (especially for TUIs like Claude/Codex).
 
@@ -136,6 +147,13 @@ codex
 ## Stop a session
 - Select a running session and click **Stop**.
 - The server will attempt graceful termination first, then force-kill if needed (best-effort, cross-platform).
+
+## Per-session artifacts (git diff snapshots)
+On session **stop** and/or **exit**, Agents Fleet can capture a git snapshot for the session repo and store it in SQLite.
+
+- UI: open the **Artifacts** tab (next to Terminal tabs) to view changed files + diff.
+- Storage: `session_artifacts` table.
+- Toggle: set `AGENTS_FLEET_CAPTURE_GIT_ON_END=0` to disable capture.
 
 ## Scripts
 - `pnpm dev:one` installs deps if needed and runs dev for all workspaces (web + server).
