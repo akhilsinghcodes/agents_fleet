@@ -86,14 +86,22 @@ See `ARCHITECTURE.md`.
 COREPACK_HOME="$PWD/.corepack" pnpm install
 ```
 
-## Run (dev)
-In separate terminals:
+## Run (dev) — one command
+```bash
+pnpm dev:one
+```
+
+This will:
+- install dependencies (if needed)
+- start `apps/server` + `apps/web` in parallel
+
+Open: `http://localhost:5173`
+
+## Run (dev) — manual (two terminals)
 ```bash
 COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server dev
 COREPACK_HOME="$PWD/.corepack" pnpm -C apps/web dev
 ```
-
-Open: `http://localhost:5173`
 
 ## Create a session
 1. Open the web app (Vite prints the URL, typically `http://localhost:5173`).
@@ -126,9 +134,11 @@ codex
 - The server will attempt graceful termination first, then force-kill if needed (best-effort, cross-platform).
 
 ## Scripts
-- `COREPACK_HOME="$PWD/.corepack" pnpm dev` runs all workspaces in parallel (web + server).
-- `COREPACK_HOME="$PWD/.corepack" pnpm build` builds all workspaces.
-- `COREPACK_HOME="$PWD/.corepack" pnpm typecheck` runs TypeScript checks across workspaces.
+- `pnpm dev:one` installs deps if needed and runs dev for all workspaces (web + server).
+- `pnpm dev` runs dev for all workspaces (web + server) in parallel.
+- `pnpm check` runs `lint` + `typecheck` + `test` + `build`.
+- `pnpm build` builds all workspaces.
+- `pnpm typecheck` runs TypeScript checks across workspaces.
 
 ## Tests
 ```bash

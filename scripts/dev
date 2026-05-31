@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+set -eu
+
+# Contributor-friendly "one command" dev runner.
+# Keeps Corepack cache local to the repo to avoid global permission issues.
+
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$REPO_ROOT"
+
+# Ensure corepack uses a repo-local cache.
+COREPACK_HOME="$REPO_ROOT/.corepack"
+export COREPACK_HOME
+
+# Enable corepack (Node 20+ ships it).
+if command -v corepack >/dev/null 2>&1; then
+  corepack enable >/dev/null 2>&1 || true
+fi
+
+# Install deps if needed.
+if [ ! -d "$REPO_ROOT/node_modules" ]; then
+  echo "[agents_fleet] Installing dependencies (pnpm install)…"
+  pnpm install
+fi
+
+echo "[agents_fleet] Starting dev (server + web)…"
+pnpm dev
