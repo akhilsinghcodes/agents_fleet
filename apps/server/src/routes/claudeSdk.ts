@@ -68,7 +68,7 @@ function captureGitArtifactBestEffort(
   storeSessionArtifact({ sessionId, kind, content });
 }
 
-export function claudeSdkRouter(processManager: ProcessManager): Router {
+export function claudeSdkRouter(_processManager: ProcessManager): Router {
   const router = createRouter();
 
   router.post("/claude-sdk/sessions", async (req: Request, res: Response) => {
