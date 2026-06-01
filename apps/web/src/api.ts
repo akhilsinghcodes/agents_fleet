@@ -51,6 +51,72 @@ export async function createSession(
   return json.session;
 }
 
+// NOTE: legacy Claude CLI UI was removed. Keeping this stub commented-out until
+// we reintroduce it.
+//
+// export async function createClaudeSession(
+//   req: CreateClaudeSessionRequest,
+// ): Promise<Session> {
+//   const res = await fetch("/api/claude/sessions", {
+//     method: "POST",
+//     headers: { "content-type": "application/json" },
+//     body: JSON.stringify(req),
+//   });
+//   const json = await parseJson<{ session: Session } | ApiErrorShape>(res);
+//   if (isApiError(json)) throw new Error(json.error.message);
+//   if (!res.ok) throw new Error("Request failed");
+//   return json.session;
+// }
+
+export type CreateClaudeSdkSessionRequest = {
+  repoPath: string;
+  permissionMode?:
+    | "acceptEdits"
+    | "auto"
+    | "bypassPermissions"
+    | "default"
+    | "dontAsk"
+    | "plan";
+  // Optional explicit Anthropic model string.
+  // If omitted, server chooses a default.
+  model?: string;
+  maxBudgetUsd?: number;
+  budgetUsd?: number;
+  budgetTokens?: number;
+};
+
+export async function createClaudeSdkSession(
+  req: CreateClaudeSdkSessionRequest,
+): Promise<Session> {
+  const res = await fetch("/api/claude-sdk/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  const json = await parseJson<{ session: Session } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  if (!res.ok) throw new Error("Request failed");
+  return json.session;
+}
+
+export async function claudeSdkSendMessage(args: {
+  sessionId: string;
+  text: string;
+}): Promise<{ assistantText: string }> {
+  const res = await fetch(
+    `/api/claude-sdk/sessions/${encodeURIComponent(args.sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: args.text }),
+    },
+  );
+  const json = await parseJson<{ assistantText: string } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  if (!res.ok) throw new Error("Request failed");
+  return json;
+}
+
 export async function stopSession(id: string): Promise<Session> {
   const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/stop`, {
     method: "POST",

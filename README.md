@@ -12,7 +12,9 @@ This repository contains a **working MVP**:
 - Node + Express + TypeScript server:
   - SQLite persistence (`data/agents_fleet.sqlite`)
   - session + terminal history HTTP APIs
-  - WebSocket live PTY streaming (`/ws`)
+  - WebSocket streaming (`/ws`):
+    - live PTY output for shell/CLI sessions
+    - live Claude SDK chat streaming + tool events
 - shared TypeScript types (`packages/shared`)
 
 ## Demo
@@ -106,6 +108,8 @@ COREPACK_HOME="$PWD/.corepack" pnpm install
 pnpm dev:one
 ```
 
+On first run, this may optionally prompt you for `ANTHROPIC_API_KEY` and save it to `.env.local` (gitignored). Press Enter to skip.
+
 This will:
 - install dependencies (if needed)
 - start `apps/server` + `apps/web` in parallel
@@ -135,14 +139,43 @@ codex
 ```
 
 ## Interactive sessions (e.g. Claude)
+### Claude Code / Codex (PTY)
 - Start a session with command `claude` (or `codex` if installed).
 - Type directly into the **Terminal (live)** pane (xterm.js).
 - Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
+### Claude (SDK) chat (tool-calling)
+**Prerequisite:** set `ANTHROPIC_API_KEY` (required). The server will reject Claude SDK requests if it’s missing.
+
+- Switch to **Claude (SDK)** in the UI.
+- Provide a repo path and chat normally.
+- The assistant can propose `run_command` tool calls; you must **Approve** or **Reject** each command.
+- Tool output is capped (100KB) and stored as session artifacts.
+
+Screenshots:
+- Claude SDK session stopped by budget
+
+![Claude SDK budget stop](screenshots/claude_chat_budget.jpg)
+
+- Claude SDK tool call + output
+
+![Claude SDK tool call](screenshots/claude_chat_tool_call.jpg)
+
+- Claude SDK tool permission gate (Approve/Reject)
+
+![Claude SDK tool permission](screenshots/claude_chat_tool_permission.jpg)
+
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.
-- The server estimates tokens as `ceil(text.length / 4)` and computes estimated cost using default rates.
+- Token estimation: `ceil(text.length / 4)`.
+- Cost estimation:
+  - shell/PTY sessions use the default rates in `apps/server/src/budget.ts`
+  - Claude SDK sessions use a model-based pricing table (`computeModelCostUsd`) and SDK-reported usage when available.
 - If a budget is exceeded, the session is stopped automatically and `stop_reason` becomes `budget_exceeded`.
+
+> Note: USD cost is still an estimate unless you configure model pricing to match your account/contract.
+>
+> Configure pricing via a remote API (`PRICING_API_URL`, must be https) or via local overrides (`PRICING_JSON` inline JSON / `PRICING_JSON_PATH` file path). See `apps/server/src/pricing.ts` for schema + env vars.
 
 ## Stop a session
 - Select a running session and click **Stop**.

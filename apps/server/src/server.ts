@@ -8,6 +8,5 @@ hub.attach(server);
 
 const port = Number(process.env.PORT ?? 3001);
 server.listen(port, () => {
-   
   console.log(`Agents Fleet server listening on http://localhost:${port}`);
 });

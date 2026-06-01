@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@agents_fleet/shared";
 import { createSession, listSessions, stopSession } from "./api";
+import ClaudeSdkChat from "./ClaudeSdkChat";
 import { openWs, type WsServerMessage } from "./ws";
 
 import TerminalPane from "./TerminalPane";
@@ -13,6 +14,7 @@ export default function App() {
   const [budgetUsd, setBudgetUsd] = useState<string>("");
   const [budgetTokens, setBudgetTokens] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [leftTab, setLeftTab] = useState<"shell" | "claude_sdk">("shell");
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -25,6 +27,9 @@ export default function App() {
   const [centerTab, setCenterTab] = useState<"terminal" | "logs" | "artifacts">(
     "terminal",
   );
+
+  // Used to force-remount the Claude SDK "new chat" composer so it resets its internal state.
+  const [claudeDraftNonce, setClaudeDraftNonce] = useState(0);
 
   async function refreshSessions(preserveSelected = true) {
     const next = await listSessions();
@@ -105,7 +110,8 @@ export default function App() {
       setBudgetTokens("");
       await refreshSessions(false);
       setSelectedId(session.id);
-      setCenterTab("artifacts");
+      // Keep the live terminal visible by default for shell sessions.
+      setCenterTab("terminal");
     } catch (err) {
       setError(String(err));
     }
@@ -137,237 +143,347 @@ export default function App() {
         background: "#f6f7fb",
       }}
     >
-      <section
-        style={{
-          background: "white",
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-          padding: 12,
-        }}
-      >
-        <h2 style={{ margin: "0 0 8px 0" }}>New Session</h2>
-        <form onSubmit={onCreate} style={{ display: "grid", gap: 8 }}>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#374151" }}>Repo path</span>
-            <input
-              value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              placeholder="/path/to/repo"
-              style={{
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: "1px solid #d1d5db",
-              }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#374151" }}>Command</span>
-            <input
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder='git status  (or: node -e "console.log(123)")'
-              style={{
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: "1px solid #d1d5db",
-              }}
-            />
-          </label>
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-          >
-            <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontSize: 12, color: "#374151" }}>Budget USD</span>
-              <input
-                value={budgetUsd}
-                onChange={(e) => setBudgetUsd(e.target.value)}
-                placeholder="(optional)"
-                inputMode="decimal"
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                }}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontSize: 12, color: "#374151" }}>
-                Budget tokens
-              </span>
-              <input
-                value={budgetTokens}
-                onChange={(e) => setBudgetTokens(e.target.value)}
-                placeholder="(optional)"
-                inputMode="numeric"
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                }}
-              />
-            </label>
-          </div>
-          <button
-            type="submit"
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #111827",
-              background: "#111827",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            Start
-          </button>
-        </form>
-        {error ? (
-          <p style={{ marginTop: 10, color: "#b91c1c", fontSize: 12 }}>
-            {error}
-          </p>
-        ) : null}
-      </section>
-
-      <section
-        style={{ display: "grid", gridTemplateRows: "auto 1fr", gap: 8 }}
-      >
-        <header
+      <section style={{ position: "relative" }}>
+        <div
           style={{
             background: "white",
             border: "1px solid #e5e7eb",
             borderRadius: 12,
             padding: 12,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            display: "grid",
+            gridTemplateRows: "auto 1fr",
+            gap: 10,
+            minHeight: 0,
+            opacity: 1,
+            pointerEvents: "auto",
           }}
         >
-          <div>
-            <div style={{ fontWeight: 600 }}>Live Output</div>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-              {selected
-                ? `${selected.status} • ${selected.repo_path}`
-                : "Select a session"}
-            </div>
-            {selected ? (
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                in={selected.estimated_input_tokens} out=
-                {selected.estimated_output_tokens} cost=$
-                {selected.estimated_cost_usd.toFixed(6)}
-                {selected.budget_usd ? ` / $${selected.budget_usd}` : ""}
-                {selected.budget_tokens
-                  ? ` / ${selected.budget_tokens} tok`
-                  : ""}
-                {selected.stop_reason ? ` • ${selected.stop_reason}` : ""}
-              </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <h2 style={{ margin: 0 }}>New Session</h2>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => setLeftTab("shell")}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+                background: leftTab === "shell" ? "#111827" : "white",
+                color: leftTab === "shell" ? "white" : "#111827",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              Shell
+            </button>
+            <button
+              onClick={() => setLeftTab("claude_sdk")}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+                background: leftTab === "claude_sdk" ? "#111827" : "white",
+                color: leftTab === "claude_sdk" ? "white" : "#111827",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              Claude (SDK)
+            </button>
+            {leftTab === "claude_sdk" ? (
+              <button
+                onClick={() => {
+                  // Clear selection AND force remount of the new-chat composer.
+                  setSelectedId(null);
+                  setClaudeDraftNonce((n) => n + 1);
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  background: "white",
+                  color: "#111827",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+                title="Start a new chat"
+              >
+                New chat
+              </button>
             ) : null}
           </div>
-          <button
-            onClick={onStop}
-            disabled={!selected || selected.status !== "running"}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid #ef4444",
-              background:
-                selected?.status === "running" ? "#ef4444" : "#fee2e2",
-              color: selected?.status === "running" ? "white" : "#9ca3af",
-              cursor:
-                selected?.status === "running" ? "pointer" : "not-allowed",
-            }}
-          >
-            Stop
-          </button>
-        </header>
-        <div
-          style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gap: 8 }}
-        >
-          <div
-            style={{
-              background: "white",
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              padding: 8,
-              display: "flex",
-              gap: 8,
-            }}
-          >
-            <button
-              onClick={() => setCenterTab("terminal")}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 10,
-                border: "1px solid #e5e7eb",
-                background: centerTab === "terminal" ? "#111827" : "white",
-                color: centerTab === "terminal" ? "white" : "#111827",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Terminal (live)
-            </button>
-            <button
-              onClick={() => setCenterTab("logs")}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 10,
-                border: "1px solid #e5e7eb",
-                background: centerTab === "logs" ? "#111827" : "white",
-                color: centerTab === "logs" ? "white" : "#111827",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Terminal (persisted)
-            </button>
-            <button
-              onClick={() => setCenterTab("artifacts")}
-              disabled={!selectedId}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 10,
-                border: "1px solid #e5e7eb",
-                background: centerTab === "artifacts" ? "#111827" : "white",
-                color: centerTab === "artifacts" ? "white" : "#111827",
-                cursor: selectedId ? "pointer" : "not-allowed",
-                fontSize: 12,
-                opacity: selectedId ? 1 : 0.5,
-              }}
-            >
-              Artifacts
-            </button>
-          </div>
 
+          {leftTab === "shell" ? (
+            <div style={{ overflow: "auto", minHeight: 0 }}>
+              <form onSubmit={onCreate} style={{ display: "grid", gap: 8 }}>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ fontSize: 12, color: "#374151" }}>
+                    Repo path
+                  </span>
+                  <input
+                    value={repoPath}
+                    onChange={(e) => setRepoPath(e.target.value)}
+                    placeholder="/path/to/repo"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                    }}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ fontSize: 12, color: "#374151" }}>
+                    Command
+                  </span>
+                  <input
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    placeholder='git status  (or: node -e "console.log(123)")'
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                    }}
+                  />
+                </label>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                  }}
+                >
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ fontSize: 12, color: "#374151" }}>
+                      Budget USD
+                    </span>
+                    <input
+                      value={budgetUsd}
+                      onChange={(e) => setBudgetUsd(e.target.value)}
+                      placeholder="(optional)"
+                      inputMode="decimal"
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ fontSize: 12, color: "#374151" }}>
+                      Budget tokens
+                    </span>
+                    <input
+                      value={budgetTokens}
+                      onChange={(e) => setBudgetTokens(e.target.value)}
+                      placeholder="(optional)"
+                      inputMode="numeric"
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                      }}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="submit"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #111827",
+                    background: "#111827",
+                    color: "white",
+                    cursor: "pointer",
+                  }}
+                >
+                  Start
+                </button>
+                {error ? (
+                  <p style={{ marginTop: 10, color: "#b91c1c", fontSize: 12 }}>
+                    {error}
+                  </p>
+                ) : null}
+              </form>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          gap: 8,
+          minHeight: 0,
+        }}
+      >
+        {leftTab === "claude_sdk" ? (
           <div style={{ minHeight: 0 }}>
-            {selectedId && centerTab === "terminal" ? (
-              <TerminalPane
-                sessionId={selectedId}
-                ws={ws}
-                active={centerTab === "terminal"}
+            {selected && selected.command === "[claude-sdk]" ? (
+              <ClaudeSdkChat mode="existing" sessionId={selected.id} />
+            ) : (
+              <ClaudeSdkChat
+                key={`claude-new-${claudeDraftNonce}`}
+                mode="new"
+                onCreated={(session) => {
+                  setError(null);
+                  refreshSessions(false).catch(() => undefined);
+                  setSelectedId(session.id);
+                  setCenterTab("artifacts");
+                }}
               />
-            ) : selectedId && centerTab === "logs" ? (
-              <TerminalReplay
-                sessionId={selectedId}
-                active={centerTab === "logs"}
-                freezeAtExit={selected?.command.trim() === "claude"}
-              />
-            ) : selectedId && centerTab === "artifacts" ? (
+            )}
+          </div>
+        ) : (
+          <>
+            <header
+              style={{
+                background: "white",
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                padding: 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600 }}>Live Output</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {selected
+                    ? `${selected.status} • ${selected.repo_path}`
+                    : "Select a session"}
+                </div>
+                {selected ? (
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                    in={selected.estimated_input_tokens} out=
+                    {selected.estimated_output_tokens} cost=$
+                    {selected.estimated_cost_usd.toFixed(6)}
+                    {selected.budget_usd ? ` / $${selected.budget_usd}` : ""}
+                    {selected.budget_tokens
+                      ? ` / ${selected.budget_tokens} tok`
+                      : ""}
+                    {selected.stop_reason ? ` • ${selected.stop_reason}` : ""}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                onClick={onStop}
+                disabled={!selected || selected.status !== "running"}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ef4444",
+                  background:
+                    selected?.status === "running" ? "#ef4444" : "#fee2e2",
+                  color: selected?.status === "running" ? "white" : "#9ca3af",
+                  cursor:
+                    selected?.status === "running" ? "pointer" : "not-allowed",
+                }}
+              >
+                Stop
+              </button>
+            </header>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateRows: "auto 1fr auto",
+                gap: 8,
+                minHeight: 0,
+              }}
+            >
               <div
                 style={{
                   background: "white",
                   border: "1px solid #e5e7eb",
                   borderRadius: 12,
-                  padding: 12,
-                  height: "100%",
-                  overflow: "auto",
-                  boxSizing: "border-box",
+                  padding: 8,
+                  display: "flex",
+                  gap: 8,
                 }}
               >
-                <SessionArtifacts sessionId={selectedId} />
+                <button
+                  onClick={() => setCenterTab("terminal")}
+                  disabled={!selectedId}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    background: centerTab === "terminal" ? "#111827" : "white",
+                    color: centerTab === "terminal" ? "white" : "#111827",
+                    cursor: selectedId ? "pointer" : "not-allowed",
+                    fontSize: 12,
+                    opacity: selectedId ? 1 : 0.5,
+                  }}
+                >
+                  Terminal (live)
+                </button>
+                <button
+                  onClick={() => setCenterTab("logs")}
+                  disabled={!selectedId}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    background: centerTab === "logs" ? "#111827" : "white",
+                    color: centerTab === "logs" ? "white" : "#111827",
+                    cursor: selectedId ? "pointer" : "not-allowed",
+                    fontSize: 12,
+                    opacity: selectedId ? 1 : 0.5,
+                  }}
+                >
+                  Terminal (persisted)
+                </button>
+                <button
+                  onClick={() => setCenterTab("artifacts")}
+                  disabled={!selectedId}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    background: centerTab === "artifacts" ? "#111827" : "white",
+                    color: centerTab === "artifacts" ? "white" : "#111827",
+                    cursor: selectedId ? "pointer" : "not-allowed",
+                    fontSize: 12,
+                    opacity: selectedId ? 1 : 0.5,
+                  }}
+                >
+                  Artifacts
+                </button>
               </div>
-            ) : null}
-          </div>
-        </div>
+
+              <div style={{ minHeight: 0 }}>
+                {selectedId && centerTab === "terminal" ? (
+                  <TerminalPane
+                    sessionId={selectedId}
+                    ws={ws}
+                    active={centerTab === "terminal"}
+                  />
+                ) : selectedId && centerTab === "logs" ? (
+                  <TerminalReplay
+                    sessionId={selectedId}
+                    active={centerTab === "logs"}
+                    freezeAtExit={selected?.command.trim() === "claude"}
+                  />
+                ) : selectedId && centerTab === "artifacts" ? (
+                  <div
+                    style={{
+                      background: "white",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: 12,
+                      height: "100%",
+                      overflow: "auto",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <SessionArtifacts sessionId={selectedId} />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <section

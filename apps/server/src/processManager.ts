@@ -19,6 +19,8 @@ type RunningSession = {
   repoPath: string;
   command: string;
 
+  lastOutputAt: number;
+
   // PTY persistence buffering (avoid DB write per chunk)
   ptyBuffer: string;
   ptyFlushTimer: NodeJS.Timeout | null;
@@ -49,6 +51,8 @@ function captureGitArtifactBestEffort(
 }
 
 const PTY_FLUSH_MS = 50;
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_POLL_MS = 15 * 1000;
 
 function insertMarker(sessionId: string, kind: string) {
   const timestamp = nowIso();
@@ -138,7 +142,16 @@ async function updateSessionFields(
 
 export class ProcessManager {
   private readonly running = new Map<string, RunningSession>();
-  constructor(private readonly hub: SessionWsHub) {}
+  constructor(private readonly hub: SessionWsHub) {
+    // Global idle timeout: stop sessions with no output for a while.
+    setInterval(() => {
+      const now = Date.now();
+      for (const [sessionId, r] of this.running.entries()) {
+        if (now - r.lastOutputAt < IDLE_TIMEOUT_MS) continue;
+        void this.stopSession(sessionId, "idle_timeout");
+      }
+    }, IDLE_POLL_MS).unref?.();
+  }
 
   private flushPty(sessionId: string) {
     const r = this.running.get(sessionId);
@@ -196,6 +209,7 @@ export class ProcessManager {
       rows,
       repoPath: args.repoPath,
       command: args.command,
+      lastOutputAt: Date.now(),
       ptyBuffer: "",
       ptyFlushTimer: null,
     });
@@ -231,6 +245,7 @@ export class ProcessManager {
 
       const r = this.running.get(args.sessionId);
       if (r) {
+        r.lastOutputAt = Date.now();
         r.ptyBuffer += data;
         if (!r.ptyFlushTimer) {
           r.ptyFlushTimer = setTimeout(
