@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session, WsServerMessage } from "@agents_fleet/shared";
-import { createClaudeSdkSession, getSession, getSessionArtifacts } from "./api";
+import {
+  createClaudeSdkSession,
+  getSession,
+  getSessionArtifacts,
+  getSessionArtifacts as fetchArtifacts,
+} from "./api";
 import { openWs } from "./ws";
 
 type Props =
@@ -13,12 +18,30 @@ type Props =
       sessionId: string;
     };
 
-type Item = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  ts: string;
-};
+type Item =
+  | {
+      id: string;
+      role: "user" | "assistant";
+      text: string;
+      ts: string;
+      kind?: "text";
+    }
+  | {
+      id: string;
+      role: "assistant";
+      ts: string;
+      kind: "tool_request";
+      toolCallId: string;
+      command: string;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      ts: string;
+      kind: "tool_output";
+      toolCallId: string;
+      text: string;
+    };
 
 function nowIso() {
   return new Date().toISOString();
@@ -41,7 +64,19 @@ export default function ClaudeSdkChat(props: Props) {
   const [budgetUsd, setBudgetUsd] = useState<string>("");
 
   const [session, setSession] = useState<Session | null>(null);
+  const [usage, setUsage] = useState<{
+    inputTokens: number;
+    outputTokens: number;
+    thinkingTokens?: number | null;
+    cacheReadTokens?: number | null;
+    cacheWriteTokens?: number | null;
+  } | null>(null);
   const [items, setItems] = useState<Item[]>([]);
+  const [pendingTool, setPendingTool] = useState<{
+    sessionId: string;
+    toolCallId: string;
+    command: string;
+  } | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +117,58 @@ export default function ClaudeSdkChat(props: Props) {
         if (!active || active.sessionId !== msg.sessionId) return;
 
         setItems((prev) =>
-          prev.map((it) =>
-            it.id === active.assistantItemId
-              ? { ...it, text: it.text + msg.text }
-              : it,
-          ),
+          prev.map((it) => {
+            if (it.id !== active.assistantItemId) return it;
+            if (!("text" in it)) return it;
+            return { ...it, text: it.text + msg.text };
+          }),
         );
+        return;
+      }
+
+      if (msg.type === "claude_sdk_tool_request") {
+        setPendingTool({
+          sessionId: msg.sessionId,
+          toolCallId: msg.toolCallId,
+          command: msg.command,
+        });
+
+        setItems((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            ts: nowIso(),
+            kind: "tool_request",
+            toolCallId: msg.toolCallId,
+            command: msg.command,
+          },
+        ]);
+        return;
+      }
+
+      if (msg.type === "claude_sdk_tool_output") {
+        // Clear pending tool prompt when it resolves.
+        setPendingTool((cur) =>
+          cur && cur.toolCallId === msg.toolCallId ? null : cur,
+        );
+
+        const text =
+          `[tool output] exit=${msg.exitCode} truncated=${msg.truncated} durationMs=${msg.durationMs}\n` +
+          (msg.stdout ? `--- stdout ---\n${msg.stdout}\n` : "") +
+          (msg.stderr ? `--- stderr ---\n${msg.stderr}\n` : "");
+
+        setItems((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            ts: nowIso(),
+            kind: "tool_output",
+            toolCallId: msg.toolCallId,
+            text,
+          },
+        ]);
         return;
       }
 
@@ -104,11 +185,37 @@ export default function ClaudeSdkChat(props: Props) {
           activeStreamRef.current = null;
         }
 
-        // Refresh session estimates/budget display
+        // Refresh session estimates/budget display + usage counters
         void (async () => {
           try {
             const s = await getSession(msg.sessionId);
             setSession(s);
+
+            const art = await fetchArtifacts({
+              sessionId: msg.sessionId,
+              latest: true,
+              kind: "claude_sdk_usage_v1",
+            });
+            const row = art.artifacts?.[0];
+            if (row) {
+              const parsed = JSON.parse(row.content) as any;
+              setUsage({
+                inputTokens: Number(parsed.inputTokens ?? 0),
+                outputTokens: Number(parsed.outputTokens ?? 0),
+                thinkingTokens:
+                  typeof parsed.thinkingTokens === "number"
+                    ? parsed.thinkingTokens
+                    : null,
+                cacheReadTokens:
+                  typeof parsed.cacheReadTokens === "number"
+                    ? parsed.cacheReadTokens
+                    : null,
+                cacheWriteTokens:
+                  typeof parsed.cacheWriteTokens === "number"
+                    ? parsed.cacheWriteTokens
+                    : null,
+              });
+            }
           } catch {
             // ignore
           }
@@ -189,8 +296,25 @@ export default function ClaudeSdkChat(props: Props) {
     // (This avoids confusing placeholder values like "/path/to/repo" after creation.)
     setRepoPath(created.repo_path);
 
+    // Ensure we're subscribed so streaming works immediately.
+    const ws = openClaudeWs();
+    void subscribeClaudeWs(ws, created.id);
+
     props.onCreated(created);
     return created;
+  }
+
+  async function ensureSessionReady() {
+    if (props.mode !== "new") return;
+    if (session) return;
+    if (repoPath.trim().length === 0) return;
+
+    try {
+      await startIfNeeded();
+    } catch (e) {
+      // show validation/server errors
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   useEffect(() => {
@@ -324,6 +448,18 @@ export default function ClaudeSdkChat(props: Props) {
                 color: "#6b7280",
               }}
             >
+              <span
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                  color: "#111827",
+                  fontWeight: 600,
+                }}
+              >
+                Session ready
+              </span>
               <span>
                 id=
                 <b
@@ -339,10 +475,20 @@ export default function ClaudeSdkChat(props: Props) {
                 status=<b>{session.status}</b>
               </span>
               <span>
-                in=<b>{session.estimated_input_tokens}</b>
+                in=<b>{usage?.inputTokens ?? session.estimated_input_tokens}</b>
               </span>
               <span>
-                out=<b>{session.estimated_output_tokens}</b>
+                out=
+                <b>{usage?.outputTokens ?? session.estimated_output_tokens}</b>
+              </span>
+              <span>
+                thinking=<b>{usage?.thinkingTokens ?? "—"}</b>
+              </span>
+              <span>
+                cacheR=<b>{usage?.cacheReadTokens ?? "—"}</b>
+              </span>
+              <span>
+                cacheW=<b>{usage?.cacheWriteTokens ?? "—"}</b>
               </span>
               <span>
                 cost=<b>${session.estimated_cost_usd.toFixed(6)}</b>
@@ -371,7 +517,7 @@ export default function ClaudeSdkChat(props: Props) {
               value={repoPath}
               onChange={(e) => setRepoPath(e.target.value)}
               placeholder="/path/to/repo"
-              disabled={props.mode === "existing" || !!session}
+              disabled={props.mode === "existing"}
               style={{
                 padding: "8px 10px",
                 borderRadius: 8,
@@ -401,7 +547,7 @@ export default function ClaudeSdkChat(props: Props) {
                     // ignore
                   }
                 }}
-                disabled={props.mode === "existing" || !!session}
+                disabled={props.mode === "existing"}
                 style={{
                   padding: "8px 10px",
                   borderRadius: 8,
@@ -428,7 +574,7 @@ export default function ClaudeSdkChat(props: Props) {
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                disabled={props.mode === "existing" || !!session}
+                disabled={props.mode === "existing"}
                 style={{
                   padding: "8px 10px",
                   borderRadius: 8,
@@ -473,7 +619,7 @@ export default function ClaudeSdkChat(props: Props) {
                 onChange={(e) => setBudgetUsd(e.target.value)}
                 placeholder="(optional)"
                 inputMode="decimal"
-                disabled={props.mode === "existing" || !!session}
+                disabled={props.mode === "existing"}
                 style={{
                   padding: "8px 10px",
                   borderRadius: 8,
@@ -510,16 +656,86 @@ export default function ClaudeSdkChat(props: Props) {
             <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>
               {it.role} • {new Date(it.ts).toLocaleTimeString()}
             </div>
-            <div
-              style={{
-                whiteSpace: "pre-wrap",
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                fontSize: 12,
-              }}
-            >
-              {it.text}
-            </div>
+
+            {it.kind === "tool_request" ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    fontSize: 12,
+                  }}
+                >
+                  {`[tool] run_command: ${it.command}`}
+                </div>
+
+                {pendingTool && pendingTool.toolCallId === it.toolCallId ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => {
+                        const ws = openClaudeWs();
+                        ws.send(
+                          JSON.stringify({
+                            type: "claude_sdk_tool_decision",
+                            sessionId: pendingTool.sessionId,
+                            toolCallId: pendingTool.toolCallId,
+                            approved: true,
+                          }),
+                        );
+                      }}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 10,
+                        border: "1px solid #111827",
+                        background: "#111827",
+                        color: "white",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => {
+                        const ws = openClaudeWs();
+                        ws.send(
+                          JSON.stringify({
+                            type: "claude_sdk_tool_decision",
+                            sessionId: pendingTool.sessionId,
+                            toolCallId: pendingTool.toolCallId,
+                            approved: false,
+                          }),
+                        );
+                        setPendingTool(null);
+                      }}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 10,
+                        border: "1px solid #e5e7eb",
+                        background: "white",
+                        color: "#111827",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                  fontSize: 12,
+                }}
+              >
+                {"text" in it ? it.text : ""}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -528,6 +744,15 @@ export default function ClaudeSdkChat(props: Props) {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onFocus={() => {
+            // Create the session when the user is about to chat.
+            void ensureSessionReady();
+          }}
+          onMouseDown={() => {
+            // Avoid requiring an extra click: if focusing via mouse, kick off session creation
+            // before focus so the first click still lands in the input.
+            void ensureSessionReady();
+          }}
           placeholder={session ? "Write a message…" : "Write a message…"}
           style={{
             flex: 1,

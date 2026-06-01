@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Session } from "@agents_fleet/shared";
 import { getDb } from "./db";
-import { computeCostUsd, estimateTokens } from "./budget";
+import { computeModelCostUsd, estimateTokens } from "./budget";
 
 function nowIso() {
   return new Date().toISOString();
@@ -88,6 +88,28 @@ export type ClaudeSdkMessageV1 = {
   text: string;
 };
 
+export type ClaudeSdkToolApprovalV1 = {
+  v: 1;
+  tool: "run_command";
+  input: { command: string };
+  approved: boolean;
+  decidedAt: string;
+};
+
+export type ClaudeSdkToolResultV1 = {
+  v: 1;
+  tool: "run_command";
+  input: { command: string };
+  output: {
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    truncated: boolean;
+    durationMs: number;
+  };
+  timestamp: string;
+};
+
 export function storeClaudeSdkMessage(
   sessionId: string,
   msg: ClaudeSdkMessageV1,
@@ -101,6 +123,40 @@ export function storeClaudeSdkMessage(
     `INSERT INTO session_artifacts (id, session_id, timestamp, kind, content)
      VALUES (?, ?, ?, ?, ?)`,
   ).run(crypto.randomUUID(), sessionId, nowIso(), kind, JSON.stringify(msg));
+}
+
+export function storeClaudeSdkToolApproval(
+  sessionId: string,
+  approval: ClaudeSdkToolApprovalV1,
+) {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO session_artifacts (id, session_id, timestamp, kind, content)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    crypto.randomUUID(),
+    sessionId,
+    nowIso(),
+    "claude_sdk_tool_approval_v1",
+    JSON.stringify(approval),
+  );
+}
+
+export function storeClaudeSdkToolResult(
+  sessionId: string,
+  result: ClaudeSdkToolResultV1,
+) {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO session_artifacts (id, session_id, timestamp, kind, content)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    crypto.randomUUID(),
+    sessionId,
+    nowIso(),
+    "claude_sdk_tool_result_v1",
+    JSON.stringify(result),
+  );
 }
 
 export function loadClaudeSdkTranscript(
@@ -121,6 +177,9 @@ export type UsageSnapshotV1 = {
   v: 1;
   inputTokens: number;
   outputTokens: number;
+  thinkingTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
   estimatedCostUsd: number;
 };
 
@@ -142,6 +201,17 @@ export async function runClaudeSdkTurn(args: {
   sessionId: string;
   userText: string;
   onChunk?: (text: string) => void;
+  onToolRequest?: (args: { toolCallId: string; command: string }) => Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    truncated: boolean;
+    durationMs: number;
+  }>;
+  // Called after each model step (including intermediate tool-use steps)
+  onUsage?: (usage: UsageSnapshotV1) => void;
+  // Called by the turn runner to check if execution should stop (e.g. budget exceeded)
+  shouldStop?: () => boolean;
 }) {
   const key = requireAnthropicKey();
   const cfg = loadClaudeSdkConfig(args.sessionId);
@@ -157,39 +227,188 @@ export async function runClaudeSdkTurn(args: {
   }));
 
   const client = new Anthropic({ apiKey: key });
-  const stream = await client.messages.stream({
-    model: cfg.model,
-    max_tokens: cfg.maxTokens,
-    messages,
-  });
+
+  // Tool definition: request to run a shell command in the repo.
+  const tools: Anthropic.Messages.Tool[] = [
+    {
+      name: "run_command",
+      description:
+        "Run a shell command in the repository working directory and return stdout/stderr and exit code. Use for things like git status, tests, linters, etc.",
+      input_schema: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description: "The shell command to run.",
+          },
+        },
+        required: ["command"],
+      },
+    },
+  ];
 
   let assistantText = "";
-  for await (const event of stream) {
-    // The SDK stream event types are a discriminated union, but we keep parsing
-    // minimal for MVP.
-    const e = event as unknown as { type?: unknown; delta?: unknown };
-    if (e.type === "content_block_delta") {
-      const d = e.delta as unknown as { type?: unknown; text?: unknown };
-      if (d.type === "text_delta" && typeof d.text === "string") {
-        assistantText += d.text;
-        args.onChunk?.(d.text);
-      }
-    }
+  let usageAcc: UsageSnapshotV1 = {
+    v: 1,
+    inputTokens: 0,
+    outputTokens: 0,
+    thinkingTokens: null,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+    estimatedCostUsd: 0,
+  };
+
+  function bumpUsageFromResponse(res: unknown) {
+    // Best-effort extraction; shape varies by API/model.
+    const u = (res as { usage?: unknown }).usage as
+      | {
+          input_tokens?: unknown;
+          output_tokens?: unknown;
+          // optional fields
+          thinking_tokens?: unknown;
+          cache_read_input_tokens?: unknown;
+          cache_creation_input_tokens?: unknown;
+        }
+      | undefined;
+
+    if (!u) return;
+
+    const inTok = typeof u.input_tokens === "number" ? u.input_tokens : 0;
+    const outTok = typeof u.output_tokens === "number" ? u.output_tokens : 0;
+    usageAcc.inputTokens += inTok;
+    usageAcc.outputTokens += outTok;
+
+    const thinking =
+      typeof u.thinking_tokens === "number" ? u.thinking_tokens : null;
+    const cacheRead =
+      typeof u.cache_read_input_tokens === "number"
+        ? u.cache_read_input_tokens
+        : null;
+    const cacheWrite =
+      typeof u.cache_creation_input_tokens === "number"
+        ? u.cache_creation_input_tokens
+        : null;
+
+    // If present, accumulate
+    if (thinking != null)
+      usageAcc.thinkingTokens = (usageAcc.thinkingTokens ?? 0) + thinking;
+    if (cacheRead != null)
+      usageAcc.cacheReadTokens = (usageAcc.cacheReadTokens ?? 0) + cacheRead;
+    if (cacheWrite != null)
+      usageAcc.cacheWriteTokens = (usageAcc.cacheWriteTokens ?? 0) + cacheWrite;
+
+    usageAcc.estimatedCostUsd = computeModelCostUsd({
+      model: cfg.model,
+      inputTokens: usageAcc.inputTokens,
+      outputTokens: usageAcc.outputTokens,
+    });
+
+    args.onUsage?.({ ...usageAcc });
   }
 
-  // Usage: SDK may provide it via final message; if not, fall back to rough estimate.
-  // For MVP, estimate tokens from text lengths.
-  const inputTokens = estimateTokens(args.userText);
-  const outputTokens = estimateTokens(assistantText);
-  const estimatedCostUsd = computeCostUsd(inputTokens, outputTokens);
-  storeClaudeSdkUsage(args.sessionId, {
-    v: 1,
-    inputTokens,
-    outputTokens,
-    estimatedCostUsd,
-  });
+  // Multi-step: model may request tool use. We loop until it returns a normal message.
+  let loopGuard = 0;
+  let currentMessages = messages;
+  while (loopGuard++ < 10) {
+    if (args.shouldStop?.()) break;
 
-  return { assistantText };
+    const res = await client.messages.create({
+      model: cfg.model,
+      max_tokens: cfg.maxTokens,
+      messages: currentMessages,
+      tools,
+      tool_choice: { type: "auto" },
+    });
+
+    bumpUsageFromResponse(res);
+
+    // If assistant asked for tool(s), execute and send tool_result back.
+    const toolUses = res.content.filter(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+    );
+
+    const textBlocks = res.content.filter(
+      (b): b is Anthropic.Messages.TextBlock => b.type === "text",
+    );
+
+    // Accumulate any assistant text returned in this step.
+    for (const tb of textBlocks) {
+      assistantText += tb.text;
+      args.onChunk?.(tb.text);
+    }
+
+    if (toolUses.length === 0) {
+      // No tool use => final.
+      break;
+    }
+
+    if (!args.onToolRequest) {
+      throw new Error(
+        "Tool requested but onToolRequest handler not configured",
+      );
+    }
+
+    // Add assistant message with tool_use blocks to the conversation.
+    currentMessages = [
+      ...currentMessages,
+      {
+        role: "assistant",
+        content: res.content,
+      },
+    ];
+
+    // Execute each tool use sequentially and append tool_result blocks.
+    const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+    for (const tu of toolUses) {
+      const input = tu.input as unknown as { command?: unknown };
+      const command = typeof input.command === "string" ? input.command : "";
+      const out = await args.onToolRequest({
+        toolCallId: tu.id,
+        command,
+      });
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: tu.id,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(out),
+          },
+        ],
+        is_error: out.exitCode !== 0,
+      });
+    }
+
+    currentMessages = [
+      ...currentMessages,
+      {
+        role: "user",
+        content: toolResults,
+      },
+    ];
+  }
+
+  // Persist the accumulated usage if we got any usage info from the API.
+  // If we didn't, fall back to rough estimate from text.
+  if (usageAcc.inputTokens === 0 && usageAcc.outputTokens === 0) {
+    usageAcc = {
+      v: 1,
+      inputTokens: estimateTokens(args.userText),
+      outputTokens: estimateTokens(assistantText),
+      thinkingTokens: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      estimatedCostUsd: computeModelCostUsd({
+        model: cfg.model,
+        inputTokens: estimateTokens(args.userText),
+        outputTokens: estimateTokens(assistantText),
+      }),
+    };
+  }
+
+  storeClaudeSdkUsage(args.sessionId, usageAcc);
+
+  return { assistantText, usage: usageAcc };
 }
 
 export function assertClaudeSdkSession(sessionId: string): Session {
