@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Session } from "@agents_fleet/shared";
 import { getDb } from "./db";
-import { computeModelCostUsd, estimateTokens } from "./budget";
+import { computeModelCostUsdAsync, estimateTokens } from "./budget";
 
 function nowIso() {
   return new Date().toISOString();
@@ -258,7 +258,7 @@ export async function runClaudeSdkTurn(args: {
     estimatedCostUsd: 0,
   };
 
-  function bumpUsageFromResponse(res: unknown) {
+  async function bumpUsageFromResponse(res: unknown) {
     // Best-effort extraction; shape varies by API/model.
     const u = (res as { usage?: unknown }).usage as
       | {
@@ -290,14 +290,23 @@ export async function runClaudeSdkTurn(args: {
         : null;
 
     // If present, accumulate
-    if (thinking != null)
-      usageAcc.thinkingTokens = (usageAcc.thinkingTokens ?? 0) + thinking;
-    if (cacheRead != null)
-      usageAcc.cacheReadTokens = (usageAcc.cacheReadTokens ?? 0) + cacheRead;
-    if (cacheWrite != null)
-      usageAcc.cacheWriteTokens = (usageAcc.cacheWriteTokens ?? 0) + cacheWrite;
+    if (thinking != null) {
+      const prev = usageAcc.thinkingTokens;
+      usageAcc.thinkingTokens =
+        (typeof prev === "number" ? prev : 0) + thinking;
+    }
+    if (cacheRead != null) {
+      const prev = usageAcc.cacheReadTokens;
+      usageAcc.cacheReadTokens =
+        (typeof prev === "number" ? prev : 0) + cacheRead;
+    }
+    if (cacheWrite != null) {
+      const prev = usageAcc.cacheWriteTokens;
+      usageAcc.cacheWriteTokens =
+        (typeof prev === "number" ? prev : 0) + cacheWrite;
+    }
 
-    usageAcc.estimatedCostUsd = computeModelCostUsd({
+    usageAcc.estimatedCostUsd = await computeModelCostUsdAsync({
       model: cfg.model,
       inputTokens: usageAcc.inputTokens,
       outputTokens: usageAcc.outputTokens,
@@ -320,7 +329,7 @@ export async function runClaudeSdkTurn(args: {
       tool_choice: { type: "auto" },
     });
 
-    bumpUsageFromResponse(res);
+    await bumpUsageFromResponse(res);
 
     // If assistant asked for tool(s), execute and send tool_result back.
     const toolUses = res.content.filter(
@@ -398,7 +407,7 @@ export async function runClaudeSdkTurn(args: {
       thinkingTokens: null,
       cacheReadTokens: null,
       cacheWriteTokens: null,
-      estimatedCostUsd: computeModelCostUsd({
+      estimatedCostUsd: await computeModelCostUsdAsync({
         model: cfg.model,
         inputTokens: estimateTokens(args.userText),
         outputTokens: estimateTokens(assistantText),

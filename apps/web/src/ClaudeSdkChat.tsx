@@ -96,6 +96,10 @@ export default function ClaudeSdkChat(props: Props) {
   const effectiveSessionId =
     props.mode === "existing" ? props.sessionId : session?.id;
 
+  // Ensure the variable is used (and keep intent explicit): when this changes,
+  // we should resubscribe the WS stream to the correct session.
+  void effectiveSessionId;
+
   function openClaudeWs(): WebSocket {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       return wsRef.current;
@@ -198,21 +202,26 @@ export default function ClaudeSdkChat(props: Props) {
             });
             const row = art.artifacts?.[0];
             if (row) {
-              const parsed = JSON.parse(row.content) as any;
+              const parsed = JSON.parse(row.content) as unknown;
+              const obj =
+                typeof parsed === "object" && parsed !== null
+                  ? (parsed as Record<string, unknown>)
+                  : null;
+
               setUsage({
-                inputTokens: Number(parsed.inputTokens ?? 0),
-                outputTokens: Number(parsed.outputTokens ?? 0),
+                inputTokens: Number(obj?.inputTokens ?? 0),
+                outputTokens: Number(obj?.outputTokens ?? 0),
                 thinkingTokens:
-                  typeof parsed.thinkingTokens === "number"
-                    ? parsed.thinkingTokens
+                  typeof obj?.thinkingTokens === "number"
+                    ? obj.thinkingTokens
                     : null,
                 cacheReadTokens:
-                  typeof parsed.cacheReadTokens === "number"
-                    ? parsed.cacheReadTokens
+                  typeof obj?.cacheReadTokens === "number"
+                    ? obj.cacheReadTokens
                     : null,
                 cacheWriteTokens:
-                  typeof parsed.cacheWriteTokens === "number"
-                    ? parsed.cacheWriteTokens
+                  typeof obj?.cacheWriteTokens === "number"
+                    ? obj.cacheWriteTokens
                     : null,
               });
             }

@@ -5,7 +5,7 @@ import { Router as createRouter } from "express";
 import type { Session } from "@agents_fleet/shared";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
-import { computeModelCostUsd, estimateTokens } from "../budget";
+import { computeModelCostUsdAsync, estimateTokens } from "../budget";
 import { buildGitArtifactContent } from "../gitArtifacts";
 import {
   assertClaudeSdkSession,
@@ -191,7 +191,7 @@ export function claudeSdkRouter(_processManager: ProcessManager): Router {
       // For MVP we use estimated usage; later we can use SDK-reported usage.
       const cfg = loadClaudeSdkConfig(sessionId);
       const predictedIn = session.estimated_input_tokens + estimateTokens(text);
-      const predictedCost = computeModelCostUsd({
+      const predictedCost = await computeModelCostUsdAsync({
         model: cfg.model,
         inputTokens: predictedIn,
         outputTokens: session.estimated_output_tokens,
