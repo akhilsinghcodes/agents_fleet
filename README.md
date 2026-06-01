@@ -145,6 +145,8 @@ codex
 - Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
 ### Claude (SDK) chat (tool-calling)
+**Prerequisite:** set `ANTHROPIC_API_KEY` (required). The server will reject Claude SDK requests if it’s missing.
+
 - Switch to **Claude (SDK)** in the UI.
 - Provide a repo path and chat normally.
 - The assistant can propose `run_command` tool calls; you must **Approve** or **Reject** each command.
