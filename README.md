@@ -173,7 +173,7 @@ Screenshots:
 
 > Note: USD cost is still an estimate unless you configure model pricing to match your account/contract.
 >
-> Configure pricing via `PRICING_JSON` (inline JSON) or `PRICING_JSON_PATH` (path to a JSON file). See `apps/server/src/pricing.ts` for schema.
+> Configure pricing via a remote API (`PRICING_API_URL`, must be https) or via local overrides (`PRICING_JSON` inline JSON / `PRICING_JSON_PATH` file path). See `apps/server/src/pricing.ts` for schema + env vars.
 
 ## Stop a session
 - Select a running session and click **Stop**.

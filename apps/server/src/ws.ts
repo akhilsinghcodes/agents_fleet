@@ -13,7 +13,7 @@ import {
   updateSessionEstimatesFromUsage,
   loadClaudeSdkConfig,
 } from "./claudeSdk";
-import { computeModelCostUsd } from "./budget";
+import { computeModelCostUsdAsync } from "./budget";
 import { getDb } from "./db";
 import { runCommand } from "./commandRunner";
 import { WebSocketServer, WebSocket } from "ws";
@@ -269,7 +269,7 @@ export class SessionWsHub {
         if (current) {
           const predictedIn =
             current.estimated_input_tokens + Math.ceil(text.length / 4);
-          const predictedCost = computeModelCostUsd({
+          const predictedCost = await computeModelCostUsdAsync({
             model: loadClaudeSdkConfig(sessionId).model,
             inputTokens: predictedIn,
             outputTokens: current.estimated_output_tokens,
