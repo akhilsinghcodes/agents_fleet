@@ -4,8 +4,14 @@ import type {
   WsClientMessage,
   WsServerMessage,
 } from "@agents_fleet/shared";
-import { WebSocketServer, WebSocket } from "ws";
+import {
+  assertClaudeSdkSession,
+  runClaudeSdkTurn,
+  storeClaudeSdkMessage,
+  updateSessionEstimatesFromUsage,
+} from "./claudeSdk";
 import { getDb } from "./db";
+import { WebSocketServer, WebSocket } from "ws";
 import type { ProcessManager } from "./processManager";
 
 function safeSend(ws: WebSocket, message: WsServerMessage) {
@@ -51,6 +57,13 @@ export class SessionWsHub {
               parsed.cols,
               parsed.rows,
             );
+          if (parsed.type === "claude_sdk_send")
+            return void this.handleClaudeSdkSend(
+              ws,
+              parsed.sessionId,
+              parsed.text,
+            );
+
           safeSend(ws, { type: "error", message: "Unknown message type" });
         } catch {
           safeSend(ws, { type: "error", message: "Invalid JSON" });
@@ -167,6 +180,85 @@ export class SessionWsHub {
       Math.max(2, Math.floor(cols)),
       Math.max(2, Math.floor(rows)),
     );
+  }
+
+  private handleClaudeSdkSend(ws: WebSocket, sessionId: string, text: string) {
+    if (!sessionId)
+      return safeSend(ws, { type: "error", message: "Missing sessionId" });
+    if (typeof text !== "string" || text.trim().length === 0)
+      return safeSend(ws, { type: "error", message: "text is required" });
+
+    // Fire-and-forget: stream chunks back over WS.
+    void (async () => {
+      let session: Session;
+      try {
+        session = assertClaudeSdkSession(sessionId);
+      } catch (e) {
+        safeSend(ws, { type: "error", message: String(e) });
+        return;
+      }
+
+      // persist user message
+      storeClaudeSdkMessage(sessionId, { v: 1, role: "user", text });
+
+      try {
+        const { assistantText } = await runClaudeSdkTurn({
+          sessionId,
+          userText: text,
+          onChunk: (delta) => {
+            safeSend(ws, {
+              type: "claude_sdk_chunk",
+              sessionId,
+              text: delta,
+            });
+          },
+        });
+
+        storeClaudeSdkMessage(sessionId, {
+          v: 1,
+          role: "assistant",
+          text: assistantText,
+        });
+
+        // Update estimates from latest usage artifact.
+        const db = getDb();
+        const usageRow = db
+          .prepare(
+            `SELECT content FROM session_artifacts
+             WHERE session_id = ? AND kind = 'claude_sdk_usage_v1'
+             ORDER BY timestamp DESC, id DESC
+             LIMIT 1`,
+          )
+          .get(sessionId) as { content: string } | undefined;
+        if (usageRow) {
+          const usage = JSON.parse(usageRow.content);
+          updateSessionEstimatesFromUsage(sessionId, usage);
+        }
+
+        // Tell client we're done and include final text (source of truth)
+        safeSend(ws, { type: "claude_sdk_done", sessionId, assistantText });
+
+        // Broadcast updated session row (budgets/estimates)
+        const next = getDb()
+          .prepare(
+            `SELECT
+              id, created_at, status, command, repo_path, pid, exit_code, ended_at,
+              budget_usd, budget_tokens,
+              estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
+              budget_exceeded_at, stop_reason
+            FROM sessions WHERE id = ?`,
+          )
+          .get(sessionId) as Session | undefined;
+        if (next) this.broadcastSession(next);
+
+        // NOTE: git snapshot capture-on-turn is only implemented in the HTTP route for now.
+      } catch (e) {
+        safeSend(ws, {
+          type: "error",
+          message: `Claude SDK request failed: ${String(e)}`,
+        });
+      }
+    })();
   }
 
   private unsubscribe(ws: WebSocket) {

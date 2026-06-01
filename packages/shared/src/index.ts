@@ -52,7 +52,8 @@ export type ApiError = {
 export type WsClientMessage =
   | { type: "subscribe"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
-  | { type: "resize"; sessionId: string; cols: number; rows: number };
+  | { type: "resize"; sessionId: string; cols: number; rows: number }
+  | { type: "claude_sdk_send"; sessionId: string; text: string };
 
 export type WsServerMessage =
   | { type: "subscribed"; sessionId: string }
@@ -65,4 +66,14 @@ export type WsServerMessage =
       stream: LogStream;
       message: string;
     }
-  | { type: "session"; session: Session };
+  | { type: "session"; session: Session }
+  | {
+      type: "claude_sdk_chunk";
+      sessionId: string;
+      text: string;
+    }
+  | {
+      type: "claude_sdk_done";
+      sessionId: string;
+      assistantText: string;
+    };
