@@ -12,7 +12,9 @@ This repository contains a **working MVP**:
 - Node + Express + TypeScript server:
   - SQLite persistence (`data/agents_fleet.sqlite`)
   - session + terminal history HTTP APIs
-  - WebSocket live PTY streaming (`/ws`)
+  - WebSocket streaming (`/ws`):
+    - live PTY output for shell/CLI sessions
+    - live Claude SDK chat streaming + tool events
 - shared TypeScript types (`packages/shared`)
 
 ## Demo
@@ -137,14 +139,39 @@ codex
 ```
 
 ## Interactive sessions (e.g. Claude)
+### Claude Code / Codex (PTY)
 - Start a session with command `claude` (or `codex` if installed).
 - Type directly into the **Terminal (live)** pane (xterm.js).
 - Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
+### Claude (SDK) chat (tool-calling)
+- Switch to **Claude (SDK)** in the UI.
+- Provide a repo path and chat normally.
+- The assistant can propose `run_command` tool calls; you must **Approve** or **Reject** each command.
+- Tool output is capped (100KB) and stored as session artifacts.
+
+Screenshots:
+- Claude SDK session stopped by budget
+
+![Claude SDK budget stop](screenshots/claude_chat_budget.jpg)
+
+- Claude SDK tool call + output
+
+![Claude SDK tool call](screenshots/claude_chat_tool_call.jpg)
+
+- Claude SDK tool permission gate (Approve/Reject)
+
+![Claude SDK tool permission](screenshots/claude_chat_tool_permission.jpg)
+
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.
-- The server estimates tokens as `ceil(text.length / 4)` and computes estimated cost using default rates.
+- Token estimation: `ceil(text.length / 4)`.
+- Cost estimation:
+  - shell/PTY sessions use the default rates in `apps/server/src/budget.ts`
+  - Claude SDK sessions use a model-based pricing table (`computeModelCostUsd`) and SDK-reported usage when available.
 - If a budget is exceeded, the session is stopped automatically and `stop_reason` becomes `budget_exceeded`.
+
+> Note: USD cost is still an estimate unless you configure the pricing table to match your account/contract.
 
 ## Stop a session
 - Select a running session and click **Stop**.
@@ -179,3 +206,4 @@ COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server test
 - PTY sessions do not preserve stdout/stderr separation.
 - Token/cost is an estimate unless the CLI provides actual usage.
 - Some TUIs (notably Claude) may clear/restore the alternate screen on exit. The persisted replay is a faithful stream replay, so end-of-session scrollback may differ from what you remember seeing just before exit.
+hi

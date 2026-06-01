@@ -5,7 +5,7 @@ import { Router as createRouter } from "express";
 import type { Session } from "@agents_fleet/shared";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
-import { computeCostUsd, estimateTokens } from "../budget";
+import { computeModelCostUsd, estimateTokens } from "../budget";
 import { buildGitArtifactContent } from "../gitArtifacts";
 import {
   assertClaudeSdkSession,
@@ -191,10 +191,11 @@ export function claudeSdkRouter(processManager: ProcessManager): Router {
       // For MVP we use estimated usage; later we can use SDK-reported usage.
       const cfg = loadClaudeSdkConfig(sessionId);
       const predictedIn = session.estimated_input_tokens + estimateTokens(text);
-      const predictedCost = computeCostUsd(
-        predictedIn,
-        session.estimated_output_tokens,
-      );
+      const predictedCost = computeModelCostUsd({
+        model: cfg.model,
+        inputTokens: predictedIn,
+        outputTokens: session.estimated_output_tokens,
+      });
       const usdBudgetExceeded =
         typeof session.budget_usd === "number" &&
         session.budget_usd > 0 &&
@@ -204,7 +205,19 @@ export function claudeSdkRouter(processManager: ProcessManager): Router {
         session.budget_tokens > 0 &&
         predictedIn + session.estimated_output_tokens >= session.budget_tokens;
       if (usdBudgetExceeded || tokenBudgetExceeded) {
-        await processManager.stopSession(sessionId, "budget_exceeded");
+        // Claude SDK sessions are not managed by ProcessManager.running, so stopSession()
+        // would be a no-op. Update the DB row directly.
+        const now = nowIso();
+        getDb()
+          .prepare(
+            `UPDATE sessions SET
+              status = 'stopped',
+              ended_at = ?,
+              budget_exceeded_at = ?,
+              stop_reason = 'budget_exceeded'
+             WHERE id = ?`,
+          )
+          .run(now, now, sessionId);
         return jsonError(res, 400, "Budget exceeded; session stopped");
       }
 

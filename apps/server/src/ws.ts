@@ -8,9 +8,14 @@ import {
   assertClaudeSdkSession,
   runClaudeSdkTurn,
   storeClaudeSdkMessage,
+  storeClaudeSdkToolApproval,
+  storeClaudeSdkToolResult,
   updateSessionEstimatesFromUsage,
+  loadClaudeSdkConfig,
 } from "./claudeSdk";
+import { computeModelCostUsd } from "./budget";
 import { getDb } from "./db";
+import { runCommand } from "./commandRunner";
 import { WebSocketServer, WebSocket } from "ws";
 import type { ProcessManager } from "./processManager";
 
@@ -23,6 +28,15 @@ export class SessionWsHub {
   private readonly clientToSession = new Map<WebSocket, string | null>();
   private readonly sessionToClients = new Map<string, Set<WebSocket>>();
   private processManager: ProcessManager | null = null;
+
+  // Pending tool approvals per session/toolCallId
+  private readonly pendingToolDecisions = new Map<
+    string,
+    Map<
+      string,
+      { resolve: (v: boolean) => void; ws: WebSocket; command: string }
+    >
+  >();
 
   setProcessManager(pm: ProcessManager) {
     this.processManager = pm;
@@ -62,6 +76,13 @@ export class SessionWsHub {
               ws,
               parsed.sessionId,
               parsed.text,
+            );
+          if (parsed.type === "claude_sdk_tool_decision")
+            return void this.handleClaudeSdkToolDecision(
+              ws,
+              parsed.sessionId,
+              parsed.toolCallId,
+              parsed.approved,
             );
 
           safeSend(ws, { type: "error", message: "Unknown message type" });
@@ -182,6 +203,39 @@ export class SessionWsHub {
     );
   }
 
+  private handleClaudeSdkToolDecision(
+    ws: WebSocket,
+    sessionId: string,
+    toolCallId: string,
+    approved: boolean,
+  ) {
+    if (!sessionId || typeof sessionId !== "string") return;
+    if (!toolCallId || typeof toolCallId !== "string") return;
+
+    const perSession = this.pendingToolDecisions.get(sessionId);
+    const pending = perSession?.get(toolCallId);
+    if (!pending) {
+      return safeSend(ws, {
+        type: "error",
+        message: "No pending tool approval for that id",
+      });
+    }
+
+    // Only allow the same ws that initiated the request to decide (simple MVP).
+    if (pending.ws !== ws) {
+      return safeSend(ws, {
+        type: "error",
+        message: "Tool approval must be decided by the requesting client",
+      });
+    }
+
+    perSession?.delete(toolCallId);
+    if (perSession && perSession.size === 0)
+      this.pendingToolDecisions.delete(sessionId);
+
+    pending.resolve(!!approved);
+  }
+
   private handleClaudeSdkSend(ws: WebSocket, sessionId: string, text: string) {
     if (!sessionId)
       return safeSend(ws, { type: "error", message: "Missing sessionId" });
@@ -198,11 +252,65 @@ export class SessionWsHub {
         return;
       }
 
+      // Budget preflight: block if already exceeded or this message would exceed.
+      try {
+        const db = getDb();
+        const current = db
+          .prepare(
+            `SELECT
+              id, created_at, status, command, repo_path, pid, exit_code, ended_at,
+              budget_usd, budget_tokens,
+              estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
+              budget_exceeded_at, stop_reason
+            FROM sessions WHERE id = ?`,
+          )
+          .get(sessionId) as Session | undefined;
+
+        if (current) {
+          const predictedIn =
+            current.estimated_input_tokens + Math.ceil(text.length / 4);
+          const predictedCost = computeModelCostUsd({
+            model: loadClaudeSdkConfig(sessionId).model,
+            inputTokens: predictedIn,
+            outputTokens: current.estimated_output_tokens,
+          });
+          const usdBudgetExceeded =
+            typeof current.budget_usd === "number" &&
+            current.budget_usd > 0 &&
+            predictedCost >= current.budget_usd;
+          const tokenBudgetExceeded =
+            typeof current.budget_tokens === "number" &&
+            current.budget_tokens > 0 &&
+            predictedIn + current.estimated_output_tokens >=
+              current.budget_tokens;
+
+          if (usdBudgetExceeded || tokenBudgetExceeded) {
+            const now = new Date().toISOString();
+            db.prepare(
+              `UPDATE sessions SET
+                status = 'stopped',
+                ended_at = ?,
+                budget_exceeded_at = ?,
+                stop_reason = 'budget_exceeded'
+               WHERE id = ?`,
+            ).run(now, now, sessionId);
+
+            safeSend(ws, {
+              type: "error",
+              message: "Budget exceeded; session stopped",
+            });
+            return;
+          }
+        }
+      } catch {
+        // ignore budget preflight errors
+      }
+
       // persist user message
       storeClaudeSdkMessage(sessionId, { v: 1, role: "user", text });
 
       try {
-        const { assistantText } = await runClaudeSdkTurn({
+        const { assistantText, usage } = await runClaudeSdkTurn({
           sessionId,
           userText: text,
           onChunk: (delta) => {
@@ -212,6 +320,98 @@ export class SessionWsHub {
               text: delta,
             });
           },
+          onUsage: (usage) => {
+            // Update session estimates continuously during the loop.
+            updateSessionEstimatesFromUsage(sessionId, usage);
+          },
+          shouldStop: () => {
+            try {
+              const cur = getDb()
+                .prepare(
+                  "SELECT estimated_cost_usd, budget_usd FROM sessions WHERE id = ?",
+                )
+                .get(sessionId) as
+                | { estimated_cost_usd: number; budget_usd: number | null }
+                | undefined;
+              if (!cur) return false;
+              return (
+                typeof cur.budget_usd === "number" &&
+                cur.budget_usd > 0 &&
+                cur.estimated_cost_usd >= cur.budget_usd
+              );
+            } catch {
+              return false;
+            }
+          },
+          onToolRequest: async ({ toolCallId, command }) => {
+            safeSend(ws, {
+              type: "claude_sdk_tool_request",
+              sessionId,
+              toolCallId,
+              command,
+            });
+
+            // Wait for approval decision
+            const approved = await new Promise<boolean>((resolve) => {
+              let perSession = this.pendingToolDecisions.get(sessionId);
+              if (!perSession) {
+                perSession = new Map();
+                this.pendingToolDecisions.set(sessionId, perSession);
+              }
+              perSession.set(toolCallId, { resolve, ws, command });
+            });
+
+            storeClaudeSdkToolApproval(sessionId, {
+              v: 1,
+              tool: "run_command",
+              input: { command },
+              approved,
+              decidedAt: new Date().toISOString(),
+            });
+
+            if (!approved) {
+              const out = {
+                stdout: "",
+                stderr: "Rejected by user",
+                exitCode: 1,
+                truncated: false,
+                durationMs: 0,
+              };
+              storeClaudeSdkToolResult(sessionId, {
+                v: 1,
+                tool: "run_command",
+                input: { command },
+                output: out,
+                timestamp: new Date().toISOString(),
+              });
+              safeSend(ws, {
+                type: "claude_sdk_tool_output",
+                sessionId,
+                toolCallId,
+                ...out,
+              });
+              return out;
+            }
+
+            const out = await runCommand({ cwd: session.repo_path, command });
+
+            storeClaudeSdkToolResult(sessionId, {
+              v: 1,
+              tool: "run_command",
+              input: { command },
+              output: out,
+              timestamp: new Date().toISOString(),
+            });
+
+            safeSend(ws, {
+              type: "claude_sdk_tool_output",
+              sessionId,
+              toolCallId,
+              ...out,
+            });
+
+            return out;
+          },
         });
 
         storeClaudeSdkMessage(sessionId, {
@@ -220,19 +420,38 @@ export class SessionWsHub {
           text: assistantText,
         });
 
-        // Update estimates from latest usage artifact.
-        const db = getDb();
-        const usageRow = db
+        // Apply final usage snapshot (already persisted by runClaudeSdkTurn).
+        if (usage) updateSessionEstimatesFromUsage(sessionId, usage);
+
+        // Enforce budget after the turn (including any tool loops)
+        const cur = getDb()
           .prepare(
-            `SELECT content FROM session_artifacts
-             WHERE session_id = ? AND kind = 'claude_sdk_usage_v1'
-             ORDER BY timestamp DESC, id DESC
-             LIMIT 1`,
+            "SELECT estimated_cost_usd, budget_usd FROM sessions WHERE id = ?",
           )
-          .get(sessionId) as { content: string } | undefined;
-        if (usageRow) {
-          const usage = JSON.parse(usageRow.content);
-          updateSessionEstimatesFromUsage(sessionId, usage);
+          .get(sessionId) as
+          | { estimated_cost_usd: number; budget_usd: number | null }
+          | undefined;
+        if (
+          cur &&
+          typeof cur.budget_usd === "number" &&
+          cur.budget_usd > 0 &&
+          cur.estimated_cost_usd >= cur.budget_usd
+        ) {
+          const now = new Date().toISOString();
+          getDb()
+            .prepare(
+              `UPDATE sessions SET
+                status = 'stopped',
+                ended_at = ?,
+                budget_exceeded_at = ?,
+                stop_reason = 'budget_exceeded'
+              WHERE id = ?`,
+            )
+            .run(now, now, sessionId);
+          safeSend(ws, {
+            type: "error",
+            message: "Budget exceeded; session stopped",
+          });
         }
 
         // Tell client we're done and include final text (source of truth)
