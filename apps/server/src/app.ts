@@ -3,6 +3,7 @@ import { bootstrapDb } from "./db";
 import { SessionWsHub } from "./ws";
 import { ProcessManager } from "./processManager";
 import { sessionsRouter } from "./routes/sessions";
+import { claudeSdkRouter } from "./routes/claudeSdk";
 
 export type AgentsFleetServer = {
   app: Express;
@@ -25,6 +26,7 @@ export function createApp(): AgentsFleetServer {
   hub.setProcessManager(processManager);
 
   app.use("/api", sessionsRouter(processManager));
+  app.use("/api", claudeSdkRouter(processManager));
 
   return { app, hub, processManager };
 }
