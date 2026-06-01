@@ -16,6 +16,40 @@ if command -v corepack >/dev/null 2>&1; then
   corepack enable >/dev/null 2>&1 || true
 fi
 
+# Load local env if present (gitignored).
+# This is used for optional features (e.g. SDK API keys) without requiring users
+# to export env vars manually.
+ENV_LOCAL="$REPO_ROOT/.env.local"
+if [ -f "$ENV_LOCAL" ]; then
+  # shellcheck disable=SC1090
+  . "$ENV_LOCAL"
+fi
+
+# Prompt for Anthropic API key if not set (optional).
+# Users can press Enter to skip; the app should handle missing keys gracefully.
+if [ "${ANTHROPIC_API_KEY:-}" = "" ]; then
+  printf "%s" "[agents_fleet] Optional: enter ANTHROPIC_API_KEY (press Enter to skip): "
+  # Read from TTY if possible; otherwise fall back to stdin.
+  if [ -r /dev/tty ]; then
+    read -r key </dev/tty || key=""
+  else
+    read -r key || key=""
+  fi
+  if [ "$key" != "" ]; then
+    # Write to .env.local with restrictive permissions.
+    umask 077
+    {
+      echo "# Local-only environment variables for Agents Fleet (do not commit)"
+      echo "export ANTHROPIC_API_KEY=\"$key\""
+    } >"$ENV_LOCAL"
+    echo "[agents_fleet] Saved ANTHROPIC_API_KEY to .env.local"
+    # Export for this run.
+    export ANTHROPIC_API_KEY="$key"
+  else
+    echo "[agents_fleet] Skipping ANTHROPIC_API_KEY setup"
+  fi
+fi
+
 # Install deps if needed.
 if [ ! -d "$REPO_ROOT/node_modules" ]; then
   echo "[agents_fleet] Installing dependencies (pnpm install)…"

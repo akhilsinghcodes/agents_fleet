@@ -106,6 +106,8 @@ COREPACK_HOME="$PWD/.corepack" pnpm install
 pnpm dev:one
 ```
 
+On first run, this may optionally prompt you for `ANTHROPIC_API_KEY` and save it to `.env.local` (gitignored). Press Enter to skip.
+
 This will:
 - install dependencies (if needed)
 - start `apps/server` + `apps/web` in parallel
