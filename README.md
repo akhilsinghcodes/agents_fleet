@@ -171,7 +171,9 @@ Screenshots:
   - Claude SDK sessions use a model-based pricing table (`computeModelCostUsd`) and SDK-reported usage when available.
 - If a budget is exceeded, the session is stopped automatically and `stop_reason` becomes `budget_exceeded`.
 
-> Note: USD cost is still an estimate unless you configure the pricing table to match your account/contract.
+> Note: USD cost is still an estimate unless you configure model pricing to match your account/contract.
+>
+> Configure pricing via `PRICING_JSON` (inline JSON) or `PRICING_JSON_PATH` (path to a JSON file). See `apps/server/src/pricing.ts` for schema.
 
 ## Stop a session
 - Select a running session and click **Stop**.
