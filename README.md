@@ -210,4 +210,3 @@ COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server test
 - PTY sessions do not preserve stdout/stderr separation.
 - Token/cost is an estimate unless the CLI provides actual usage.
 - Some TUIs (notably Claude) may clear/restore the alternate screen on exit. The persisted replay is a faithful stream replay, so end-of-session scrollback may differ from what you remember seeing just before exit.
-hi
