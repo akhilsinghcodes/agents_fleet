@@ -53,6 +53,15 @@ export type WsClientMessage =
   | { type: "subscribe"; sessionId: string }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
+  | {
+      type: "usage_tick";
+      sessionId: string;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd?: number;
+      ctxSize?: number;
+      ctxUsedPct?: number;
+    }
   | { type: "claude_sdk_send"; sessionId: string; text: string }
   | {
       type: "claude_sdk_tool_decision";

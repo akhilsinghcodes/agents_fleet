@@ -141,6 +141,67 @@ codex
 ## Interactive sessions (e.g. Claude)
 ### Claude Code / Codex (PTY)
 - Start a session with command `claude` (or `codex` if installed).
+
+#### (Recommended) Claude Code status line for accurate budget tracking
+Claude Code can run a custom status line command that receives structured JSON about the current session (context window usage, estimated cost, etc.).
+
+For the most reliable budget tracking in Agents Fleet, configure a **single-line** status line that prints parse-friendly key/value pairs.
+
+1) Create the script:
+```bash
+#!/bin/bash
+input=$(cat)
+
+CTX_IN=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
+CTX_OUT=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
+CTX_SIZE=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
+CTX_PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+COST_FMT=$(printf '$%.6f' "$COST")
+
+# Single-line, parse-friendly output:
+# Use a unique prefix + delimiter to make parsing reliable even with TUI redraws.
+echo "AF|ctx=${CTX_IN}/${CTX_SIZE}(${CTX_PCT}%)|in=${CTX_IN}|out=${CTX_OUT}|cost=${COST_FMT}"
+```
+Save it as `~/.claude/agents_fleet_statusline.sh` and make it executable:
+```bash
+chmod +x ~/.claude/agents_fleet_statusline.sh
+```
+
+2) Update `~/.claude/settings.json`:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/agents_fleet_statusline.sh",
+    "padding": 1,
+    "refreshInterval": 1
+  }
+}
+```
+
+Notes:
+- Requires `jq` to be installed (`brew install jq` on macOS).
+- `cost.total_cost_usd` is an estimate computed client-side by Claude Code and may differ from your actual bill.
+- Type directly into the **Terminal (live)** pane (xterm.js).
+- Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
+
+#### (Recommended) Codex status line for accurate budget tracking
+Codex can also show session usage in a single-line status line. For Agents Fleet, the simplest reliable setup is to keep Codex’s built-in status line enabled and ensure it includes the usage fields below.
+
+1) Update `~/.codex/config.toml`:
+```toml
+[tui]
+status_line = ["model-with-reasoning","current-dir","context-remaining","context-used","total-input-token","total-output-tokens","weekly-limit","five-hour-limit","run-state","task-progress"]
+status_line_use_color = true
+```
+
+2) Make sure the output stays on one line in the Codex TUI.
+
+Notes:
+- The config above matches the usage fields Agents Fleet can parse for budget tracking.
+- If you change the field list, keep it single-line so PTY replay remains parse-friendly.
 - Type directly into the **Terminal (live)** pane (xterm.js).
 - Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
