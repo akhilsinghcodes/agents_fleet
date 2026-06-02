@@ -6,6 +6,10 @@ AI coding agents like Claude Code and Codex are powerful, but they have no built
 
 Local-first “mission control” for AI coding agent CLIs (and any shell commands): launch sessions in a repo, stream live output to a web UI, stop them, and keep a persisted history.
 
+## ✨ Recently Shipped
+- **Real-time usage tracking** (PR #2): Parse Claude Code status lines for accurate token/cost counting instead of estimates
+- Budget enforcement that actually works
+
 This repository contains a **working MVP**:
 - pnpm workspace monorepo
 - React + Vite + TypeScript “Mission Control” web app
