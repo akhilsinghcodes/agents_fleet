@@ -2,6 +2,52 @@ import { useEffect, useMemo, useRef } from "react";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 
+function parseClaudeStatuslineFromRenderedRow(rowText: string): {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd?: number;
+} | null {
+  // Only trust our AF-tagged status line to avoid accidentally matching other output.
+  // Supported formats:
+  // 1) API-usage oriented (recommended):
+  //    "[AF] cost=0.019656 last_in=6 last_out=13 cache_r=38601 cache_w=0 [/AF]"
+  // 2) Legacy context-oriented:
+  //    "[AF] ctx=... in=... out=... cost=... [/AF]"
+
+  // Prefer the API-usage oriented format.
+  // Supported examples:
+  // - "[AF] cost=0.019656 last_in=6 last_out=13 cache_r=38601 cache_w=0 [/AF]"
+  // - "[AF] cost=0.019656 in=38607 out=15 [/AF]" (some builds don't print last_*)
+  const m1 = rowText.match(
+    /\[AF\][\s\S]*?\bcost=\$?([0-9]+(?:\.[0-9]+)?)\b[\s\S]*?(?:\blast_in=(\d+)\b[\s\S]*?\blast_out=(\d+)\b|\bin=(\d+)\b[\s\S]*?\bout=(\d+)\b)[\s\S]*?\[\/AF\]/i,
+  );
+  if (m1) {
+    const costUsd = Number(m1[1]);
+    const inputTokens = Number(m1[2] ?? m1[4]);
+    const outputTokens = Number(m1[3] ?? m1[5]);
+    if (!Number.isFinite(costUsd) || costUsd < 0) return null;
+    if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+    if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
+    return { inputTokens, outputTokens, costUsd };
+  }
+
+  // Fall back to the legacy format.
+  const m2 = rowText.match(
+    /\[AF\][\s\S]*?\bin=(\d+)\b[\s\S]*?\bout=(\d+)\b(?:[\s\S]*?\bcost=\$?([0-9]+(?:\.[0-9]+)?))?[\s\S]*?\[\/AF\]/i,
+  );
+  if (!m2) return null;
+
+  const inputTokens = Number(m2[1]);
+  const outputTokens = Number(m2[2]);
+  const costUsd = m2[3] ? Number(m2[3]) : undefined;
+  if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+  if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
+  if (costUsd !== undefined && (!Number.isFinite(costUsd) || costUsd < 0))
+    return null;
+
+  return { inputTokens, outputTokens, costUsd };
+}
+
 type Props = {
   sessionId: string;
   ws: WebSocket | null;
@@ -121,6 +167,86 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
     return () =>
       window.removeEventListener("agents_fleet:pty", handler as EventListener);
   }, [sessionId]);
+
+  // MVP: for Claude Code sessions, read the rendered bottom row from xterm and send
+  // usage ticks to the server. This avoids brittle parsing of redraw-heavy PTY output.
+  useEffect(() => {
+    if (!active) return;
+
+    let lastSent: { inTok: number; outTok: number; cost?: number } | null =
+      null;
+
+    const interval = window.setInterval(() => {
+      const t = termRef.current;
+      const s = wsRef.current;
+      if (!t || !s || s.readyState !== WebSocket.OPEN) return;
+
+      // Read a small window of bottom rows; the status line may not be the very last row
+      // depending on terminal layout / prompts. NOTE: buffer.getLine takes an absolute
+      // line index into the scrollback+viewport buffer, NOT a viewport row index. The
+      // last visible line is at `buf.length - 1`.
+      const buf = t.buffer.active;
+      const end = buf.length - 1;
+      const start = Math.max(0, end - 60);
+
+      let best: {
+        inputTokens: number;
+        outputTokens: number;
+        costUsd?: number;
+      } | null = null;
+      for (let row = end; row >= start; row--) {
+        const line = buf.getLine(row);
+        const text = line ? line.translateToString(true) : "";
+        const p = parseClaudeStatuslineFromRenderedRow(text);
+        if (!p) continue;
+        if (!best) {
+          best = p;
+        } else {
+          // Prefer the line with higher tokens (more likely the latest statusline).
+          // If tokens are equal, prefer the one with a defined (non-null) cost.
+          const pTotal = p.inputTokens + p.outputTokens;
+          const bTotal = best.inputTokens + best.outputTokens;
+
+          const pHasCost = typeof p.costUsd === "number";
+          const bHasCost = typeof best.costUsd === "number";
+
+          if (pTotal > bTotal || (pTotal === bTotal && pHasCost && !bHasCost)) {
+            best = p;
+          }
+        }
+      }
+      if (!best) return;
+
+      const parsed = best;
+
+      // Only send if it changed.
+      if (
+        lastSent &&
+        lastSent.inTok === parsed.inputTokens &&
+        lastSent.outTok === parsed.outputTokens &&
+        lastSent.cost === parsed.costUsd
+      ) {
+        return;
+      }
+      lastSent = {
+        inTok: parsed.inputTokens,
+        outTok: parsed.outputTokens,
+        cost: parsed.costUsd,
+      };
+
+      s.send(
+        JSON.stringify({
+          type: "usage_tick",
+          sessionId,
+          inputTokens: parsed.inputTokens,
+          outputTokens: parsed.outputTokens,
+          costUsd: parsed.costUsd,
+        }),
+      );
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [active, sessionId, ws]);
 
   const helper = useMemo(() => {
     if (canUseWs) return null;

@@ -24,10 +24,259 @@ type RunningSession = {
   // PTY persistence buffering (avoid DB write per chunk)
   ptyBuffer: string;
   ptyFlushTimer: NodeJS.Timeout | null;
+
+  // Best-effort usage parsing for agent CLIs.
+  // For Codex, usage lines report absolute totals; we overwrite session estimates from these.
+  lastCodexUsage?: { input: number; output: number };
+  codexCleanTail?: string;
+
+  // Best-effort parsing for Claude Code statusLine scripts.
+  lastClaudeUsage?: {
+    ctxIn: number;
+    ctxOut: number;
+    ctxSize: number;
+    ctxPct: number;
+    costUsd: number | null;
+  };
+  claudeCleanTail?: string;
+
+  // Throttle writes from redraw-heavy status parsing.
+  codexLastPersistAtMs?: number;
+  claudeLastPersistAtMs?: number;
+
+  // Debug instrumentation (optional).
+  _lastCodexDebugAtMs?: number;
+  _lastClaudeDebugAtMs?: number;
 };
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function parseCodexUsageTotalsFromText(
+  cleanText: string,
+): { input: number; output: number; source: "summary" | "status" } | null {
+  // Codex can show usage in two forms:
+  // 1) Status line (redraw-heavy): "... · 15.7K in · 27 out · Ready"
+  // 2) Summary line (authoritative): "Token usage: total=... input=... output=..."
+
+  // Prefer the explicit "Token usage:" line when present.
+  const m = cleanText.match(
+    /Token usage:\s*total=([0-9,]+)\s+input=([0-9,]+)[^\n]*?\s+output=([0-9,]+)/,
+  );
+  if (m) {
+    const input = Number(m[2].replace(/,/g, ""));
+    const output = Number(m[3].replace(/,/g, ""));
+    if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
+    if (input < 0 || output < 0) return null;
+    return { input, output, source: "summary" };
+  }
+
+  // Status line parsing (best-effort). Supports K/M suffixes.
+  // We want the *last* occurrence in the buffer (TUI redraws can leave stale copies).
+  const re =
+    /\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*in\b[\s\S]*?\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*out\b/gi;
+  let last: RegExpExecArray | null = null;
+  for (;;) {
+    const m2 = re.exec(cleanText);
+    if (!m2) break;
+    last = m2;
+  }
+  if (!last) return null;
+
+  function parseCompact(num: string, suffix: string): number {
+    const n = Number(num);
+    if (!Number.isFinite(n) || n < 0) return NaN;
+    const s = suffix.toUpperCase();
+    if (s === "K") return Math.round(n * 1_000);
+    if (s === "M") return Math.round(n * 1_000_000);
+    return Math.round(n);
+  }
+
+  const input = parseCompact(last[1], last[2]);
+  const output = parseCompact(last[3], last[4]);
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
+  return { input, output, source: "status" };
+}
+
+function _parseClaudeStatusLineFromText(cleanText: string): {
+  ctxIn: number;
+  ctxOut: number;
+  ctxSize: number;
+  ctxPct: number;
+  costUsd: number | null;
+} | null {
+  // Claude Code statusLine output can be redraw-fragmented in PTY output.
+  // We support a few formats and then pick the best candidate:
+  // 1) Preferred: AF|ctx=<in>/<size>(<pct>%)|in=<in>|out=<out>|cost=<usd>
+  // 2) Prefix-dropped redraw artifact: <in>/<size>(<pct>%)|in=<in>|out=<out>|cost=<usd>
+  // 3) Minimal: in=<in>|out=<out>|cost=<usd> (ctx fields missing)
+  // 4) Legacy space-delimited: ctx=... in=... out=... cost=...
+  // cost is optional.
+
+  type Candidate = {
+    ctxIn: number;
+    ctxOut: number;
+    ctxSize: number;
+    ctxPct: number;
+    costUsd: number | null;
+    score: number;
+  };
+
+  const cands: Candidate[] = [];
+
+  function pushCand(args: {
+    ctxIn: number;
+    ctxOut: number;
+    ctxSize: number;
+    ctxPct: number;
+    in2?: number;
+    costUsdRaw?: string;
+    hasCtx: boolean;
+    hasAf: boolean;
+  }) {
+    const { ctxIn, ctxOut, ctxSize, ctxPct } = args;
+    const in2 = typeof args.in2 === "number" ? args.in2 : ctxIn;
+    if (![ctxIn, ctxOut, ctxSize, ctxPct, in2].every(Number.isFinite)) return;
+    if (ctxIn < 0 || ctxOut < 0) return;
+    if (args.hasCtx) {
+      if (ctxSize <= 0) return;
+      if (ctxPct < 0 || ctxPct > 100) return;
+      // If we have both ctxIn and in= repeated, they should match.
+      if (in2 !== ctxIn) return;
+    }
+
+    const costUsd =
+      typeof args.costUsdRaw === "string" && args.costUsdRaw.length > 0
+        ? Number(args.costUsdRaw)
+        : null;
+    if (costUsd != null && (!Number.isFinite(costUsd) || costUsd < 0)) return;
+
+    // Score: prefer AF format, prefer having ctx, prefer non-zero, prefer higher totals.
+    // NOTE: treat "all zeros" as very low-quality, since early statusline invocations
+    // often emit zeros before the first API call completes.
+    const base = (args.hasAf ? 1000 : 0) + (args.hasCtx ? 100 : 0);
+    const nonZero = (ctxIn > 0 ? 50 : 0) + (ctxOut > 0 ? 10 : 0);
+    const magnitude = Math.min(100, Math.floor(Math.log10(ctxIn + 1) * 10));
+    const allZeroPenalty = ctxIn === 0 && ctxOut === 0 ? -10_000 : 0;
+    cands.push({
+      ctxIn,
+      ctxOut,
+      ctxSize,
+      ctxPct,
+      costUsd,
+      score: base + nonZero + magnitude + allZeroPenalty,
+    });
+  }
+
+  // 1) Preferred AF|ctx=...
+  {
+    const re =
+      /AF\|ctx=(\d+)\/(\d+)\((\d+)%\)\|in=(\d+)\|out=(\d+)(?:\|cost=\$?([0-9]+(?:\.[0-9]+)?))?/g;
+    for (;;) {
+      const m = re.exec(cleanText);
+      if (!m) break;
+      pushCand({
+        ctxIn: Number(m[1]),
+        ctxSize: Number(m[2]),
+        ctxPct: Number(m[3]),
+        in2: Number(m[4]),
+        ctxOut: Number(m[5]),
+        costUsdRaw: m[6],
+        hasCtx: true,
+        hasAf: true,
+      });
+    }
+  }
+
+  // 2) Prefix-dropped: <in>/<size>(<pct>%)|in=<in>|out=<out>...
+  {
+    const re =
+      /(\d+)\/(\d+)\((\d+)%\)\|in=(\d+)\|out=(\d+)(?:\|cost=\$?([0-9]+(?:\.[0-9]+)?))?/g;
+    for (;;) {
+      const m = re.exec(cleanText);
+      if (!m) break;
+      pushCand({
+        ctxIn: Number(m[4]),
+        ctxSize: Number(m[2]),
+        ctxPct: Number(m[3]),
+        in2: Number(m[4]),
+        ctxOut: Number(m[5]),
+        costUsdRaw: m[6],
+        hasCtx: true,
+        hasAf: false,
+      });
+    }
+  }
+
+  // 3) Minimal: in/out/cost only (pipe-delimited).
+  {
+    const re = /\bin=(\d+)\|out=(\d+)(?:\|cost=\$?([0-9]+(?:\.[0-9]+)?))?/g;
+    for (;;) {
+      const m = re.exec(cleanText);
+      if (!m) break;
+      pushCand({
+        ctxIn: Number(m[1]),
+        ctxOut: Number(m[2]),
+        ctxSize: 1,
+        ctxPct: 0,
+        costUsdRaw: m[3],
+        hasCtx: false,
+        hasAf: false,
+      });
+    }
+  }
+
+  // 3b) Minimal: in/out only (space-delimited fragments).
+  // TUI redraw artifacts can leave "in=... out=..." but also stray "cost=..." from unrelated text.
+  // We intentionally DO NOT parse cost here; cost should come from a full AF line.
+  {
+    const re = /\bin=(\d+)\s+out=(\d+)/g;
+    for (;;) {
+      const m = re.exec(cleanText);
+      if (!m) break;
+      pushCand({
+        ctxIn: Number(m[1]),
+        ctxOut: Number(m[2]),
+        ctxSize: 1,
+        ctxPct: 0,
+        costUsdRaw: undefined,
+        hasCtx: false,
+        hasAf: false,
+      });
+    }
+  }
+
+  // 4) Legacy space-delimited.
+  {
+    const re =
+      /ctx=(\d+)\/(\d+)\((\d+)%\)\s*in=(\d+)\s*out=(\d+)(?:\s*cost=\$?([0-9]+(?:\.[0-9]+)?))?/g;
+    for (;;) {
+      const m = re.exec(cleanText);
+      if (!m) break;
+      pushCand({
+        ctxIn: Number(m[1]),
+        ctxSize: Number(m[2]),
+        ctxPct: Number(m[3]),
+        in2: Number(m[4]),
+        ctxOut: Number(m[5]),
+        costUsdRaw: m[6],
+        hasCtx: true,
+        hasAf: false,
+      });
+    }
+  }
+
+  if (cands.length === 0) return null;
+  cands.sort((a, b) => b.score - a.score);
+  const best = cands[0];
+  return {
+    ctxIn: best.ctxIn,
+    ctxOut: best.ctxOut,
+    ctxSize: best.ctxSize,
+    ctxPct: best.ctxPct,
+    costUsd: best.costUsd,
+  };
 }
 
 function shouldCaptureGitOnEnd(): boolean {
@@ -142,6 +391,54 @@ async function updateSessionFields(
 
 export class ProcessManager {
   private readonly running = new Map<string, RunningSession>();
+
+  applyUsageTick(
+    sessionId: string,
+    tick: {
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number | null;
+      source: "client_rendered_statusline";
+    },
+  ) {
+    void (async () => {
+      const session = await getSession(sessionId);
+      if (!session) return;
+
+      // Only accept updates for Claude PTY sessions for MVP.
+      if (session.command.trim() !== "claude") return;
+
+      // Trust the client-rendered statusline as authoritative. Take the max for
+      // each field so transient zero/lower readings don't clobber real values.
+      const nextCost =
+        typeof tick.costUsd === "number"
+          ? Math.max(session.estimated_cost_usd, tick.costUsd)
+          : session.estimated_cost_usd;
+      const nextIn = Math.max(session.estimated_input_tokens, tick.inputTokens);
+      const nextOut = Math.max(
+        session.estimated_output_tokens,
+        tick.outputTokens,
+      );
+
+      if (
+        nextCost === session.estimated_cost_usd &&
+        nextIn === session.estimated_input_tokens &&
+        nextOut === session.estimated_output_tokens
+      ) {
+        return;
+      }
+
+      const updated = await updateSessionFields(sessionId, {
+        estimated_cost_usd: nextCost,
+        estimated_input_tokens: nextIn,
+        estimated_output_tokens: nextOut,
+      });
+
+      if (updated) this.hub.broadcastSession(updated);
+      void this.enforceBudget(sessionId, updated ?? session);
+    })();
+  }
+
   constructor(private readonly hub: SessionWsHub) {
     // Global idle timeout: stop sessions with no output for a while.
     setInterval(() => {
@@ -256,7 +553,134 @@ export class ProcessManager {
       }
 
       // Budget estimation is best-effort; count from the raw stream.
-      void handleOutputText(data);
+      // NOTE: For Codex sessions, we rely on Codex-reported totals (parsed from output).
+      // For Claude Code, we rely on client-rendered statusline ticks (usage_tick) for accuracy.
+      const cmd = args.command.trim();
+      if (cmd === "codex") {
+        const cleanChunk = stripAnsi(data);
+        const r2 = this.running.get(args.sessionId);
+        if (r2) {
+          const TAIL_MAX = 16_384;
+
+          if (cmd === "codex") {
+            const prevTail = r2.codexCleanTail ?? "";
+            const nextTailRaw = prevTail + cleanChunk;
+            r2.codexCleanTail =
+              nextTailRaw.length > TAIL_MAX
+                ? nextTailRaw.slice(nextTailRaw.length - TAIL_MAX)
+                : nextTailRaw;
+
+            const usage = parseCodexUsageTotalsFromText(r2.codexCleanTail);
+            if (usage) {
+              // Debug: allow inspecting codex tail + matches when needed.
+              if (process.env.AGENTS_FLEET_DEBUG_CODEX_USAGE === "1") {
+                // Avoid spamming: print at most once per second per session.
+                const now = Date.now();
+                const last = r2._lastCodexDebugAtMs;
+                if (!last || now - last >= 1000) {
+                  r2._lastCodexDebugAtMs = now;
+                  const tail = r2.codexCleanTail.slice(-500);
+                  console.log(
+                    `[codex-usage] session=${args.sessionId} src=${usage.source} in=${usage.input} out=${usage.output} tail=${JSON.stringify(tail)}`,
+                  );
+                }
+              }
+              const prev = r2.lastCodexUsage;
+              const prevIn = prev?.input ?? 0;
+              const prevOut = prev?.output ?? 0;
+              const nextIn = usage.input;
+              const nextOut = usage.output;
+
+              const monotonic = nextIn >= prevIn && nextOut >= prevOut;
+              const maxJumpStatus = 50_000;
+              const jumpOk =
+                usage.source === "summary" ||
+                (nextIn - prevIn <= maxJumpStatus &&
+                  nextOut - prevOut <= maxJumpStatus);
+
+              if (monotonic && jumpOk) {
+                if (!prev || prev.input !== nextIn || prev.output !== nextOut) {
+                  r2.lastCodexUsage = { input: nextIn, output: nextOut };
+
+                  const nowMs = Date.now();
+                  const lastPersist = r2.codexLastPersistAtMs ?? 0;
+                  const minIntervalMs = 500;
+                  const shouldPersist =
+                    usage.source === "summary" ||
+                    nowMs - lastPersist >= minIntervalMs;
+
+                  if (shouldPersist) {
+                    r2.codexLastPersistAtMs = nowMs;
+                    void (async () => {
+                      const session = await getSession(args.sessionId);
+                      if (!session) return;
+                      const cost = computeCostUsd(nextIn, nextOut);
+                      const updated = await updateSessionFields(
+                        args.sessionId,
+                        {
+                          estimated_input_tokens: nextIn,
+                          estimated_output_tokens: nextOut,
+                          estimated_cost_usd: cost,
+                        },
+                      );
+                      if (updated) this.hub.broadcastSession(updated);
+                      void this.enforceBudget(
+                        args.sessionId,
+                        updated ?? session,
+                      );
+                    })();
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        if (cmd === "claude") {
+          // Parse the Agents Fleet statusline line out of the PTY stream.
+          // Format: "[AF] in=<n> out=<n> cost=$<usd> [/AF]"
+          const cleanChunk = stripAnsi(data);
+          const r2 = this.running.get(args.sessionId);
+          if (r2) {
+            const TAIL_MAX = 16_384;
+            const prevTail = r2.claudeCleanTail ?? "";
+            const nextTailRaw = prevTail + cleanChunk;
+            r2.claudeCleanTail =
+              nextTailRaw.length > TAIL_MAX
+                ? nextTailRaw.slice(nextTailRaw.length - TAIL_MAX)
+                : nextTailRaw;
+
+            // Find the LAST [AF]...[/AF] block in the tail.
+            const re =
+              /\[AF\]\s+in=(\d+)\s+out=(\d+)\s+cost=\$?([0-9]+(?:\.[0-9]+)?)\s+\[\/AF\]/g;
+            let lastMatch: RegExpExecArray | null = null;
+            for (;;) {
+              const m = re.exec(r2.claudeCleanTail);
+              if (!m) break;
+              lastMatch = m;
+            }
+            if (lastMatch) {
+              const inputTokens = Number(lastMatch[1]);
+              const outputTokens = Number(lastMatch[2]);
+              const costUsd = Number(lastMatch[3]);
+              if (
+                Number.isFinite(inputTokens) &&
+                Number.isFinite(outputTokens) &&
+                Number.isFinite(costUsd)
+              ) {
+                this.applyUsageTick(args.sessionId, {
+                  inputTokens,
+                  outputTokens,
+                  costUsd,
+                  source: "client_rendered_statusline",
+                });
+              }
+            }
+          }
+        }
+        // Skip handleOutputText for claude (authoritative AF tick handles it).
+        if (cmd !== "claude") void handleOutputText(data);
+      }
     });
 
     p.onExit(({ exitCode, signal }) => {
