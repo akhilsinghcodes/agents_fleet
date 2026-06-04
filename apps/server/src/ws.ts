@@ -13,7 +13,15 @@ import {
   updateSessionEstimatesFromUsage,
   loadClaudeSdkConfig,
 } from "./claudeSdk";
+import {
+  assertLiteLlmSession,
+  loadLiteLlmConfig,
+  runLiteLlmTurn,
+  storeLiteLlmMessage,
+  updateLiteLlmSessionEstimatesFromUsage,
+} from "./litellm";
 import { computeModelCostUsdAsync } from "./budget";
+import { computeLiteLlmModelCostUsdAsync } from "./budget";
 import { getDb } from "./db";
 import { runCommand } from "./commandRunner";
 import { WebSocketServer, WebSocket } from "ws";
@@ -71,14 +79,35 @@ export class SessionWsHub {
               parsed.cols,
               parsed.rows,
             );
+          if (parsed.type === "usage_tick")
+            return void this.handleUsageTick(
+              ws,
+              parsed.sessionId,
+              parsed.inputTokens,
+              parsed.outputTokens,
+              parsed.costUsd,
+            );
           if (parsed.type === "claude_sdk_send")
             return void this.handleClaudeSdkSend(
               ws,
               parsed.sessionId,
               parsed.text,
             );
+          if (parsed.type === "litellm_send")
+            return void this.handleLiteLlmSend(
+              ws,
+              parsed.sessionId,
+              parsed.text,
+            );
           if (parsed.type === "claude_sdk_tool_decision")
             return void this.handleClaudeSdkToolDecision(
+              ws,
+              parsed.sessionId,
+              parsed.toolCallId,
+              parsed.approved,
+            );
+          if (parsed.type === "litellm_tool_decision")
+            return void this.handleLiteLlmToolDecision(
               ws,
               parsed.sessionId,
               parsed.toolCallId,
@@ -187,6 +216,39 @@ export class SessionWsHub {
     })();
   }
 
+  private handleUsageTick(
+    _ws: WebSocket,
+    sessionId: string,
+    inputTokens: number,
+    outputTokens: number,
+    costUsd?: number,
+  ) {
+    if (!this.processManager) return;
+    if (!sessionId) return;
+    if (!Number.isFinite(inputTokens) || inputTokens < 0) return;
+    if (!Number.isFinite(outputTokens) || outputTokens < 0) return;
+
+    // Ignore the initial "0 0 cost=0" tick some clients emit before the status line is rendered.
+    // This keeps logs clean and avoids unnecessary DB writes/broadcasts.
+    const normalizedCost =
+      typeof costUsd === "number" && Number.isFinite(costUsd) ? costUsd : null;
+    if (
+      inputTokens === 0 &&
+      outputTokens === 0 &&
+      (normalizedCost ?? 0) === 0
+    ) {
+      return;
+    }
+
+    // Persist best-effort usage update and broadcast session update.
+    void this.processManager.applyUsageTick(sessionId, {
+      inputTokens: Math.floor(inputTokens),
+      outputTokens: Math.floor(outputTokens),
+      costUsd: normalizedCost,
+      source: "client_rendered_statusline",
+    });
+  }
+
   private handleResize(
     ws: WebSocket,
     sessionId: string,
@@ -222,6 +284,38 @@ export class SessionWsHub {
     }
 
     // Only allow the same ws that initiated the request to decide (simple MVP).
+    if (pending.ws !== ws) {
+      return safeSend(ws, {
+        type: "error",
+        message: "Tool approval must be decided by the requesting client",
+      });
+    }
+
+    perSession?.delete(toolCallId);
+    if (perSession && perSession.size === 0)
+      this.pendingToolDecisions.delete(sessionId);
+
+    pending.resolve(!!approved);
+  }
+
+  private handleLiteLlmToolDecision(
+    ws: WebSocket,
+    sessionId: string,
+    toolCallId: string,
+    approved: boolean,
+  ) {
+    if (!sessionId || typeof sessionId !== "string") return;
+    if (!toolCallId || typeof toolCallId !== "string") return;
+
+    const perSession = this.pendingToolDecisions.get(sessionId);
+    const pending = perSession?.get(toolCallId);
+    if (!pending) {
+      return safeSend(ws, {
+        type: "error",
+        message: "No pending tool approval for that id",
+      });
+    }
+
     if (pending.ws !== ws) {
       return safeSend(ws, {
         type: "error",
@@ -475,6 +569,194 @@ export class SessionWsHub {
         safeSend(ws, {
           type: "error",
           message: `Claude SDK request failed: ${String(e)}`,
+        });
+      }
+    })();
+  }
+
+  private handleLiteLlmSend(ws: WebSocket, sessionId: string, text: string) {
+    if (!sessionId) {
+      return safeSend(ws, { type: "error", message: "Missing sessionId" });
+    }
+    if (typeof text !== "string" || text.trim().length === 0) {
+      return safeSend(ws, { type: "error", message: "text is required" });
+    }
+
+    void (async () => {
+      let session: Session;
+      try {
+        session = assertLiteLlmSession(sessionId);
+      } catch (e) {
+        safeSend(ws, { type: "error", message: String(e) });
+        return;
+      }
+
+      try {
+        const db = getDb();
+        const current = db
+          .prepare(
+            `SELECT
+              id, created_at, status, command, repo_path, pid, exit_code, ended_at,
+              budget_usd, budget_tokens,
+              estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
+              budget_exceeded_at, stop_reason
+            FROM sessions WHERE id = ?`,
+          )
+          .get(sessionId) as Session | undefined;
+
+        if (current) {
+          const predictedIn =
+            current.estimated_input_tokens + Math.ceil(text.length / 4);
+          const predictedCost = await computeLiteLlmModelCostUsdAsync({
+            model: loadLiteLlmConfig(sessionId).model,
+            inputTokens: predictedIn,
+            outputTokens: current.estimated_output_tokens,
+          });
+          const usdBudgetExceeded =
+            predictedCost != null &&
+            typeof current.budget_usd === "number" &&
+            current.budget_usd > 0 &&
+            predictedCost >= current.budget_usd;
+          const tokenBudgetExceeded =
+            typeof current.budget_tokens === "number" &&
+            current.budget_tokens > 0 &&
+            predictedIn + current.estimated_output_tokens >=
+              current.budget_tokens;
+
+          if (usdBudgetExceeded || tokenBudgetExceeded) {
+            const now = new Date().toISOString();
+            db.prepare(
+              `UPDATE sessions SET
+                status = 'stopped',
+                ended_at = ?,
+                budget_exceeded_at = ?,
+                stop_reason = 'budget_exceeded'
+               WHERE id = ?`,
+            ).run(now, now, sessionId);
+            safeSend(ws, {
+              type: "error",
+              message: "Budget exceeded; session stopped",
+            });
+            return;
+          }
+        }
+      } catch {
+        // ignore budget preflight errors
+      }
+
+      storeLiteLlmMessage(sessionId, { v: 1, role: "user", text });
+
+      try {
+        const { assistantText, usage } = await runLiteLlmTurn({
+          sessionId,
+          userText: text,
+          onChunk: (delta) => {
+            safeSend(ws, {
+              type: "litellm_chunk",
+              sessionId,
+              text: delta,
+            });
+          },
+          onUsage: (snapshot) => {
+            updateLiteLlmSessionEstimatesFromUsage(sessionId, snapshot);
+          },
+          onToolCall: async ({ toolCallId, command }) => {
+            safeSend(ws, {
+              type: "litellm_tool_request",
+              sessionId,
+              toolCallId,
+              command,
+            });
+
+            // Wait for the user's approve/deny decision.
+            const approved = await new Promise<boolean>((resolve) => {
+              let perSession = this.pendingToolDecisions.get(sessionId);
+              if (!perSession) {
+                perSession = new Map();
+                this.pendingToolDecisions.set(sessionId, perSession);
+              }
+              perSession.set(toolCallId, { resolve, ws, command });
+            });
+
+            if (!approved) {
+              return { stdout: "", stderr: "Tool execution denied by user.", exitCode: 1, truncated: false, durationMs: 0 };
+            }
+
+            const result = await runCommand({
+              cwd: session.repo_path,
+              command,
+            });
+
+            safeSend(ws, {
+              type: "litellm_tool_output",
+              sessionId,
+              toolCallId,
+              stdout: result.stdout,
+              stderr: result.stderr,
+              exitCode: result.exitCode,
+              truncated: result.truncated,
+              durationMs: result.durationMs,
+            });
+
+            return result;
+          },
+        });
+
+        storeLiteLlmMessage(sessionId, {
+          v: 1,
+          role: "assistant",
+          text: assistantText,
+        });
+        updateLiteLlmSessionEstimatesFromUsage(sessionId, usage);
+
+        const cur = getDb()
+          .prepare(
+            "SELECT estimated_cost_usd, budget_usd FROM sessions WHERE id = ?",
+          )
+          .get(sessionId) as
+          | { estimated_cost_usd: number; budget_usd: number | null }
+          | undefined;
+
+        if (
+          cur &&
+          typeof cur.budget_usd === "number" &&
+          cur.budget_usd > 0 &&
+          cur.estimated_cost_usd >= cur.budget_usd
+        ) {
+          const now = new Date().toISOString();
+          getDb()
+            .prepare(
+              `UPDATE sessions SET
+                status = 'stopped',
+                ended_at = ?,
+                budget_exceeded_at = ?,
+                stop_reason = 'budget_exceeded'
+              WHERE id = ?`,
+            )
+            .run(now, now, sessionId);
+          safeSend(ws, {
+            type: "error",
+            message: "Budget exceeded; session stopped",
+          });
+        }
+
+        safeSend(ws, { type: "litellm_done", sessionId, assistantText });
+
+        const next = getDb()
+          .prepare(
+            `SELECT
+              id, created_at, status, command, repo_path, pid, exit_code, ended_at,
+              budget_usd, budget_tokens,
+              estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
+              budget_exceeded_at, stop_reason
+            FROM sessions WHERE id = ?`,
+          )
+          .get(sessionId) as Session | undefined;
+        if (next) this.broadcastSession(next);
+      } catch (e) {
+        safeSend(ws, {
+          type: "error",
+          message: `LiteLLM request failed: ${String(e)}`,
         });
       }
     })();
