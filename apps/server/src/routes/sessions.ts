@@ -307,5 +307,28 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     return res.json({ artifacts, limit, offset });
   });
 
+  /**
+   * DELETE /api/sessions/:id
+   * Response: {} | { error: { message: string } }
+   */
+  router.delete("/sessions/:id", (req, res) => {
+    const id = req.params.id;
+    const db = getDb();
+    const existing = db
+      .prepare("SELECT status FROM sessions WHERE id = ?")
+      .get(id) as { status: string } | undefined;
+    if (!existing) return jsonError(res, 404, "Session not found");
+    if (existing.status === "running")
+      return jsonError(res, 409, "Cannot delete a running session");
+
+    db.prepare("DELETE FROM pty_chunks WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM stdin_events WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM session_markers WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM session_artifacts WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+
+    return res.json({});
+  });
+
   return router;
 }

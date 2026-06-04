@@ -1,4 +1,9 @@
 import fs from "node:fs";
+import modelPriceData from "./model_price.json";
+import {
+  getClaudeSdkModelPricing,
+  getLiteLlmModelPricing as getSharedLiteLlmModelPricing,
+} from "@agents_fleet/shared";
 
 export type ModelPricing = {
   inputPer1M: number;
@@ -10,37 +15,39 @@ export type PricingConfig = {
   models: Record<string, ModelPricing>;
 };
 
-// Best-effort defaults. Override via PRICING_JSON or PRICING_JSON_PATH.
-export const DEFAULT_PRICING_CONFIG: PricingConfig = {
-  default: { inputPer1M: 3.0, outputPer1M: 15.0 },
-  models: {
-    // Claude 3
-    "claude-3-haiku-20240307": { inputPer1M: 0.25, outputPer1M: 1.25 },
-
-    // Claude 4 family (placeholder best-effort values; update to your contract/pricing)
-    // Using conservative-ish defaults to avoid under-enforcing budgets.
-    "claude-haiku-4-5": { inputPer1M: 1.0, outputPer1M: 5.0 },
-    "claude-haiku-4-5-20251001": { inputPer1M: 1.0, outputPer1M: 5.0 },
-
-    "claude-sonnet-4-0": { inputPer1M: 3.0, outputPer1M: 15.0 },
-    "claude-sonnet-4-20250514": { inputPer1M: 3.0, outputPer1M: 15.0 },
-    "claude-sonnet-4-5": { inputPer1M: 3.0, outputPer1M: 15.0 },
-    "claude-sonnet-4-5-20250929": { inputPer1M: 3.0, outputPer1M: 15.0 },
-    "claude-sonnet-4-6": { inputPer1M: 3.0, outputPer1M: 15.0 },
-
-    "claude-opus-4-0": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-1": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-1-20250805": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-20250514": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-5": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-5-20251101": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-6": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-7": { inputPer1M: 15.0, outputPer1M: 75.0 },
-    "claude-opus-4-8": { inputPer1M: 15.0, outputPer1M: 75.0 },
-
-    "claude-mythos-preview": { inputPer1M: 3.0, outputPer1M: 15.0 },
-  },
+type ModelPriceEntry = {
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
+  max_tokens?: number;
+  max_output_tokens?: number;
 };
+
+type ModelPriceFile = Record<string, ModelPriceEntry>;
+
+function toPricingConfigFromModelPriceJson(raw: unknown): PricingConfig {
+  const entries = isRecord(raw) ? (raw as ModelPriceFile) : {};
+
+  const models: Record<string, ModelPricing> = {};
+  for (const [model, entry] of Object.entries(entries)) {
+    const input = entry.input_cost_per_token;
+    const output = entry.output_cost_per_token;
+    if (!isFiniteNumber(input) || !isFiniteNumber(output)) continue;
+
+    models[model] = {
+      inputPer1M: input * 1_000_000,
+      outputPer1M: output * 1_000_000,
+    };
+  }
+
+  return {
+    default: { inputPer1M: 3.0, outputPer1M: 15.0 },
+    models,
+  };
+}
+
+// Best-effort defaults. Override via PRICING_JSON or PRICING_JSON_PATH.
+export const DEFAULT_PRICING_CONFIG: PricingConfig =
+  toPricingConfigFromModelPriceJson(modelPriceData);
 
 let cachedPricing: PricingConfig | null = null;
 let cachedPricingSource: "api" | "json" | "default" | null = null;
@@ -259,6 +266,11 @@ export function resetPricingConfigCacheForTests() {
 }
 
 export function getModelPricing(model: string): ModelPricing {
+  const mapped = getClaudeSdkModelPricing(model);
+  if (mapped.inputPer1M != null && mapped.outputPer1M != null) {
+    return { inputPer1M: mapped.inputPer1M, outputPer1M: mapped.outputPer1M };
+  }
+
   const cfg = loadPricingConfig();
   return cfg.models[model] ?? cfg.default;
 }
@@ -266,6 +278,26 @@ export function getModelPricing(model: string): ModelPricing {
 export async function getModelPricingAsync(
   model: string,
 ): Promise<ModelPricing> {
+  const mapped = getClaudeSdkModelPricing(model);
+  if (mapped.inputPer1M != null && mapped.outputPer1M != null) {
+    return { inputPer1M: mapped.inputPer1M, outputPer1M: mapped.outputPer1M };
+  }
+
   const cfg = await loadPricingConfigAsync();
   return cfg.models[model] ?? cfg.default;
+}
+
+export function getLiteLlmPricing(model: string): ModelPricing | null {
+  const mapped = getSharedLiteLlmModelPricing(model);
+  if (mapped.inputPer1M == null || mapped.outputPer1M == null) return null;
+  return {
+    inputPer1M: mapped.inputPer1M,
+    outputPer1M: mapped.outputPer1M,
+  };
+}
+
+export async function getLiteLlmPricingAsync(
+  model: string,
+): Promise<ModelPricing | null> {
+  return getLiteLlmPricing(model);
 }

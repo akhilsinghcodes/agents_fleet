@@ -6,10 +6,6 @@ AI coding agents like Claude Code and Codex are powerful, but they have no built
 
 Local-first “mission control” for AI coding agent CLIs (and any shell commands): launch sessions in a repo, stream live output to a web UI, stop them, and keep a persisted history.
 
-## ✨ Recently Shipped
-- **Real-time usage tracking** (PR #2): Parse Claude Code status lines for accurate token/cost counting instead of estimates
-- Budget enforcement that actually works
-
 This repository contains a **working MVP**:
 - pnpm workspace monorepo
 - React + Vite + TypeScript “Mission Control” web app
@@ -113,6 +109,10 @@ pnpm dev:one
 ```
 
 On first run, this may optionally prompt you for `ANTHROPIC_API_KEY` and save it to `.env.local` (gitignored). Press Enter to skip.
+
+**Environment variables:**
+- `ANTHROPIC_API_KEY` (required for Claude SDK chat)
+- `LITELLM_BASE_URL` and `LITELLM_API_KEY` (optional for LiteLLM Chat via enterprise proxy)
 
 This will:
 - install dependencies (if needed)
@@ -229,6 +229,34 @@ Screenshots:
 - Claude SDK tool permission gate (Approve/Reject)
 
 ![Claude SDK tool permission](screenshots/claude_chat_tool_permission.jpg)
+
+### LiteLLM Chat (proxy support)
+**Use your enterprise URL and API key to access multiple models through a LiteLLM proxy.**
+
+LiteLLM Chat allows you to:
+- Use your enterprise/custom LiteLLM proxy endpoint
+- Access models beyond Claude (OpenAI, Anthropic, etc.)
+- Route requests through your own infrastructure
+
+**Setup:**
+1. Set environment variables:
+```bash
+export LITELLM_BASE_URL="https://your-litellm-proxy.com"
+export LITELLM_API_KEY="your-api-key"
+```
+
+2. Switch to **LiteLLM** in the UI.
+3. Provide a repo path and select your desired model from the dropdown.
+4. Chat and use tools normally—the same Approve/Reject workflow as Claude SDK.
+
+**Notes:**
+- `LITELLM_BASE_URL` must be a valid HTTPS URL pointing to your LiteLLM proxy endpoint.
+- `LITELLM_API_KEY` is your authentication key for the proxy.
+- The available models depend on your LiteLLM proxy configuration.
+- Tool output is capped (100KB) and stored as session artifacts, just like Claude SDK.
+
+**Enterprise/Custom LLM Integration:**
+If you're running a local or enterprise LiteLLM proxy, Agents Fleet will route all requests through your infrastructure, giving you full control and visibility over API costs and usage.
 
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.
