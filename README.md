@@ -10,8 +10,6 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
-![Agents Fleet: Mission Control for Your AI Coding Agents](screenshots/AI_Agent_Mission_Control_Overview.png)
-
 ## ✨ Recently Shipped
 - **PR #3: LiteLLM chat + terminal replay improvements**
   - Added LiteLLM-backed chat support with model selection and the same approve/reject tool flow used by Claude SDK
