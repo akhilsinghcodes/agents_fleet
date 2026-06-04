@@ -43,6 +43,28 @@ export type CreateSessionRequest = {
   budgetTokens?: number;
 };
 
+export type CreateClaudeSdkSessionRequest = {
+  repoPath: string;
+  permissionMode?:
+    | "acceptEdits"
+    | "auto"
+    | "bypassPermissions"
+    | "default"
+    | "dontAsk"
+    | "plan";
+  model?: string;
+  maxBudgetUsd?: number;
+  budgetUsd?: number;
+  budgetTokens?: number;
+};
+
+export type CreateLiteLlmSessionRequest = {
+  repoPath: string;
+  model: string;
+  budgetUsd?: number;
+  budgetTokens?: number;
+};
+
 export type ApiError = {
   error: {
     message: string;
@@ -63,8 +85,15 @@ export type WsClientMessage =
       ctxUsedPct?: number;
     }
   | { type: "claude_sdk_send"; sessionId: string; text: string }
+  | { type: "litellm_send"; sessionId: string; text: string }
   | {
       type: "claude_sdk_tool_decision";
+      sessionId: string;
+      toolCallId: string;
+      approved: boolean;
+    }
+  | {
+      type: "litellm_tool_decision";
       sessionId: string;
       toolCallId: string;
       approved: boolean;
@@ -93,6 +122,16 @@ export type WsServerMessage =
       assistantText: string;
     }
   | {
+      type: "litellm_chunk";
+      sessionId: string;
+      text: string;
+    }
+  | {
+      type: "litellm_done";
+      sessionId: string;
+      assistantText: string;
+    }
+  | {
       type: "claude_sdk_tool_request";
       sessionId: string;
       toolCallId: string;
@@ -107,4 +146,32 @@ export type WsServerMessage =
       exitCode: number;
       truncated: boolean;
       durationMs: number;
+    }
+  | {
+      type: "litellm_tool_request";
+      sessionId: string;
+      toolCallId: string;
+      command: string;
+    }
+  | {
+      type: "litellm_tool_output";
+      sessionId: string;
+      toolCallId: string;
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+      truncated: boolean;
+      durationMs: number;
     };
+
+export {
+  CLAUDE_SDK_MODEL_OPTIONS,
+  LITELLM_CHAT_MODEL_OPTIONS,
+  getClaudeSdkModelPricing,
+  getLiteLlmModelPricing,
+} from "./modelPrices";
+export type {
+  ClaudeSdkModelOption,
+  LiteLlmChatModelOption,
+  ModelPriceLookup,
+} from "./modelPrices";

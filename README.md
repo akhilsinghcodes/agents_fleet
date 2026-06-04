@@ -6,10 +6,6 @@ AI coding agents like Claude Code and Codex are powerful, but they have no built
 
 Local-first “mission control” for AI coding agent CLIs (and any shell commands): launch sessions in a repo, stream live output to a web UI, stop them, and keep a persisted history.
 
-## ✨ Recently Shipped
-- **Real-time usage tracking** (PR #2): Parse Claude Code status lines for accurate token/cost counting instead of estimates
-- Budget enforcement that actually works
-
 This repository contains a **working MVP**:
 - pnpm workspace monorepo
 - React + Vite + TypeScript “Mission Control” web app
@@ -25,57 +21,83 @@ This repository contains a **working MVP**:
 
 ### Screenshots
 
-**New session form**
+**Mission control overview**
 
-![New session form](screenshots/New_Session.png)
+![Mission control overview](screenshots/AI_Agent_Mission_Control_System.png)
 
-**Live terminal (interactive agents)**
+**Local-first architecture**
 
-- Claude Code (interactive TUI rendered via xterm.js)
+![Local-first architecture](screenshots/Local_Control_for_AI_Agents.png)
 
-![Claude interactive session](screenshots/claude.png)
+**Create a new session**
 
-- OpenAI Codex (interactive)
+- Shell session
 
-![Codex interactive session](screenshots/codex.png)
+![New shell session](screenshots/New_Session_Shell.jpg)
+
+- Claude (SDK) session
+
+![New Claude SDK session](screenshots/New_Session_Claude_SDK.jpg)
+
+- LiteLLM session
+
+![New LiteLLM session](screenshots/New_Session_LiteLLM.jpg)
+
+**Interactive sessions**
+
+- Claude Code / PTY session
+
+![Claude interactive session](screenshots/claude.jpg)
+
+- OpenAI Codex / PTY session
+
+![Codex interactive session](screenshots/codex.jpg)
+
+- Codex scrollback / persisted terminal replay
+
+![Codex scrollable terminal](screenshots/codex_scrollable_terminal.jpg)
+
+**Claude SDK chat flow**
+
+- Chat conversation view
+
+![Claude SDK chat](screenshots/claude_sdk_Chat.jpg)
+
+- Command approval gate
+
+![Claude SDK approval gate](screenshots/claude_sdk_approval_gate.jpg)
+
+- Approval accepted
+
+![Claude SDK approval accepted](screenshots/claude_sdk_approval_gate_approved.jpg)
+
+- Approval rejected
+
+![Claude SDK approval rejected](screenshots/claude_sdk_approval_gate_rejected.jpg)
+
+- Persisted chat history
+
+![Claude SDK history](screenshots/claude_sdk_History.jpg)
 
 **Per-session artifacts (git diff snapshots)**
 
-- Artifacts tab (changed files + diff)
+- Git diff snapshot
 
-![Artifacts view](screenshots/artifacts_git_snapshot_small.jpg)
+![Git diff snapshot](screenshots/new_git_diff.jpg)
 
-- Artifacts view (larger change set)
+**SQLite persistence / debug views**
 
-![Artifacts view (large change)](screenshots/artifacts_git_snapshot_large.jpg)
-
-**Live output vs persisted terminal history**
-
-- Terminal (live)
-
-![git status live](screenshots/git_status_live.png)
-
-- Terminal (persisted)
-
-![git status persisted logs](screenshots/git_status_logs.png)
-
-**Budget enforcement (auto-stop)**
-
-- Token budget cutoff
-
-![Token budget cutoff](screenshots/cutoff_based_on_tokens.png)
-
-- USD budget cutoff
-
-![USD budget cutoff](screenshots/cutoff_based_on_cost.png)
-
-**Cost estimate vs actual (CLI-reported)**
-
-![Claude actual cost vs estimate](screenshots/claude_Actual_cost_vs_estimate.png)
-
-**SQLite persistence (debug views)**
+- Sessions table
 
 
+
+- Logs table
+
+
+
+### Videos
+
+- `screenshots/AgentFleet__Mission_Control_for_Your_Local_AI_Workers.mp4`
 
 The MVP persists several tables in `data/agents_fleet.sqlite`:
 
@@ -113,6 +135,10 @@ pnpm dev:one
 ```
 
 On first run, this may optionally prompt you for `ANTHROPIC_API_KEY` and save it to `.env.local` (gitignored). Press Enter to skip.
+
+**Environment variables:**
+- `ANTHROPIC_API_KEY` (required for Claude SDK chat)
+- `LITELLM_BASE_URL` and `LITELLM_API_KEY` (optional for LiteLLM Chat via enterprise proxy)
 
 This will:
 - install dependencies (if needed)
@@ -220,15 +246,43 @@ Notes:
 Screenshots:
 - Claude SDK session stopped by budget
 
-![Claude SDK budget stop](screenshots/claude_chat_budget.jpg)
+![Claude SDK budget stop](screenshots/claude_sdk_Chat.jpg)
 
 - Claude SDK tool call + output
 
-![Claude SDK tool call](screenshots/claude_chat_tool_call.jpg)
+![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg)
 
 - Claude SDK tool permission gate (Approve/Reject)
 
-![Claude SDK tool permission](screenshots/claude_chat_tool_permission.jpg)
+![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg)
+
+### LiteLLM Chat (proxy support)
+**Use your enterprise URL and API key to access multiple models through a LiteLLM proxy.**
+
+LiteLLM Chat allows you to:
+- Use your enterprise/custom LiteLLM proxy endpoint
+- Access models beyond Claude (OpenAI, Anthropic, etc.)
+- Route requests through your own infrastructure
+
+**Setup:**
+1. Set environment variables:
+```bash
+export LITELLM_BASE_URL="https://your-litellm-proxy.com"
+export LITELLM_API_KEY="your-api-key"
+```
+
+2. Switch to **LiteLLM** in the UI.
+3. Provide a repo path and select your desired model from the dropdown.
+4. Chat and use tools normally—the same Approve/Reject workflow as Claude SDK.
+
+**Notes:**
+- `LITELLM_BASE_URL` must be a valid HTTPS URL pointing to your LiteLLM proxy endpoint.
+- `LITELLM_API_KEY` is your authentication key for the proxy.
+- The available models depend on your LiteLLM proxy configuration.
+- Tool output is capped (100KB) and stored as session artifacts, just like Claude SDK.
+
+**Enterprise/Custom LLM Integration:**
+If you're running a local or enterprise LiteLLM proxy, Agents Fleet will route all requests through your infrastructure, giving you full control and visibility over API costs and usage.
 
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.

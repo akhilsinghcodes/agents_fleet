@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CLAUDE_SDK_MODEL_OPTIONS } from "@agents_fleet/shared";
 import type { Session, WsServerMessage } from "@agents_fleet/shared";
 import {
   createClaudeSdkSession,
   getSession,
   getSessionArtifacts,
   getSessionArtifacts as fetchArtifacts,
+  stopSession,
 } from "./api";
 import { openWs } from "./ws";
 
@@ -92,6 +94,11 @@ export default function ClaudeSdkChat(props: Props) {
     sessionId: string;
     assistantItemId: string;
   } | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [items]);
 
   const effectiveSessionId =
     props.mode === "existing" ? props.sessionId : session?.id;
@@ -286,7 +293,7 @@ export default function ClaudeSdkChat(props: Props) {
     }
 
     const created = await createClaudeSdkSession({
-      repoPath,
+      repoPath: repoPath.trim(),
       permissionMode: permissionMode as
         | "acceptEdits"
         | "auto"
@@ -450,73 +457,60 @@ export default function ClaudeSdkChat(props: Props) {
             <div
               style={{
                 display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
                 alignItems: "center",
+                gap: 10,
                 fontSize: 12,
                 color: "#6b7280",
+                padding: "6px 10px",
+                background: "#f9fafb",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                flexWrap: "wrap",
               }}
             >
               <span
                 style={{
-                  padding: "2px 6px",
-                  borderRadius: 999,
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                  color: "#111827",
-                  fontWeight: 600,
+                  display: "inline-block",
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: session.status === "running" ? "#16a34a" : "#9ca3af",
+                  flexShrink: 0,
                 }}
-              >
-                Session ready
-              </span>
-              <span>
-                id=
-                <b
+              />
+              <span style={{ color: "#374151", fontWeight: 500 }}>{session.status}</span>
+              <span style={{ color: "#d1d5db" }}>·</span>
+              <span>id=<b style={{ fontFamily: "ui-monospace, monospace" }}>{session.id.slice(0, 8)}</b></span>
+              <span>in=<b>{usage?.inputTokens ?? session.estimated_input_tokens}</b></span>
+              <span>out=<b>{usage?.outputTokens ?? session.estimated_output_tokens}</b></span>
+              {usage?.thinkingTokens ? <span>think=<b>{usage.thinkingTokens}</b></span> : null}
+              {usage?.cacheReadTokens ? <span>cR=<b>{usage.cacheReadTokens}</b></span> : null}
+              {usage?.cacheWriteTokens ? <span>cW=<b>{usage.cacheWriteTokens}</b></span> : null}
+              <span>cost=<b>${session.estimated_cost_usd.toFixed(6)}</b></span>
+              {session.budget_usd ? <span>/ <b>${session.budget_usd}</b></span> : null}
+              {session.stop_reason ? <span style={{ color: "#dc2626" }}>{session.stop_reason}</span> : null}
+              <div style={{ flex: 1 }} />
+              {session.status === "running" && (
+                <button
+                  onClick={() => {
+                    stopSession(session.id)
+                      .then((updated) => setSession(updated))
+                      .catch((e) => setError(String(e)));
+                  }}
                   style={{
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                    padding: "3px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #dc2626",
+                    background: "#fef2f2",
+                    color: "#dc2626",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 500,
                   }}
                 >
-                  {session.id}
-                </b>
-              </span>
-              <span>
-                status=<b>{session.status}</b>
-              </span>
-              <span>
-                in=<b>{usage?.inputTokens ?? session.estimated_input_tokens}</b>
-              </span>
-              <span>
-                out=
-                <b>{usage?.outputTokens ?? session.estimated_output_tokens}</b>
-              </span>
-              <span>
-                thinking=<b>{usage?.thinkingTokens ?? "—"}</b>
-              </span>
-              <span>
-                cacheR=<b>{usage?.cacheReadTokens ?? "—"}</b>
-              </span>
-              <span>
-                cacheW=<b>{usage?.cacheWriteTokens ?? "—"}</b>
-              </span>
-              <span>
-                cost=<b>${session.estimated_cost_usd.toFixed(6)}</b>
-              </span>
-              {session.budget_usd ? (
-                <span>
-                  budget=<b>${session.budget_usd}</b>
-                </span>
-              ) : null}
-              {session.budget_tokens ? (
-                <span>
-                  budgetTok=<b>{session.budget_tokens}</b>
-                </span>
-              ) : null}
-              {session.stop_reason ? (
-                <span>
-                  stop=<b>{session.stop_reason}</b>
-                </span>
-              ) : null}
+                  Stop
+                </button>
+              )}
             </div>
           ) : null}
 
@@ -590,26 +584,7 @@ export default function ClaudeSdkChat(props: Props) {
                   border: "1px solid #d1d5db",
                 }}
               >
-                {[
-                  "claude-haiku-4-5",
-                  "claude-haiku-4-5-20251001",
-                  "claude-sonnet-4-0",
-                  "claude-sonnet-4-20250514",
-                  "claude-sonnet-4-5",
-                  "claude-sonnet-4-5-20250929",
-                  "claude-sonnet-4-6",
-                  "claude-opus-4-0",
-                  "claude-opus-4-1",
-                  "claude-opus-4-1-20250805",
-                  "claude-opus-4-20250514",
-                  "claude-opus-4-5",
-                  "claude-opus-4-5-20251101",
-                  "claude-opus-4-6",
-                  "claude-opus-4-7",
-                  "claude-opus-4-8",
-                  "claude-mythos-preview",
-                  "claude-3-haiku-20240307",
-                ].map((m) => (
+                {CLAUDE_SDK_MODEL_OPTIONS.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -747,6 +722,7 @@ export default function ClaudeSdkChat(props: Props) {
             )}
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
