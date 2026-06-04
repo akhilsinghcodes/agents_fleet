@@ -151,8 +151,10 @@ export default function TerminalReplay({
             // Strip alt-screen enter/exit so all output lands in the main
             // scrollback buffer and the user can scroll through the full history.
             const sanitized = c.data
-              .replace(/\x1b\[?1049[hl]/g, "")
-              .replace(/\x1b\[?47[hl]/g, "");
+              .replaceAll("\u001b[?1049h", "")
+              .replaceAll("\u001b[?1049l", "")
+              .replaceAll("\u001b[?47h", "")
+              .replaceAll("\u001b[?47l", "");
             term.write(sanitized);
           }
 
