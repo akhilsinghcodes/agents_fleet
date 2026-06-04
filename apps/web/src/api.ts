@@ -1,4 +1,6 @@
 import type {
+  CreateClaudeSdkSessionRequest,
+  CreateLiteLlmSessionRequest,
   CreateSessionRequest,
   LogRow,
   Session,
@@ -68,23 +70,6 @@ export async function createSession(
 //   return json.session;
 // }
 
-export type CreateClaudeSdkSessionRequest = {
-  repoPath: string;
-  permissionMode?:
-    | "acceptEdits"
-    | "auto"
-    | "bypassPermissions"
-    | "default"
-    | "dontAsk"
-    | "plan";
-  // Optional explicit Anthropic model string.
-  // If omitted, server chooses a default.
-  model?: string;
-  maxBudgetUsd?: number;
-  budgetUsd?: number;
-  budgetTokens?: number;
-};
-
 export async function createClaudeSdkSession(
   req: CreateClaudeSdkSessionRequest,
 ): Promise<Session> {
@@ -115,6 +100,49 @@ export async function claudeSdkSendMessage(args: {
   if (isApiError(json)) throw new Error(json.error.message);
   if (!res.ok) throw new Error("Request failed");
   return json;
+}
+
+export async function createLiteLlmSession(
+  req: CreateLiteLlmSessionRequest,
+): Promise<Session> {
+  const res = await fetch("/api/litellm/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  const json = await parseJson<{ session: Session } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  if (!res.ok) throw new Error("Request failed");
+  return json.session;
+}
+
+export async function liteLlmSendMessage(args: {
+  sessionId: string;
+  text: string;
+}): Promise<{ assistantText: string }> {
+  const res = await fetch(
+    `/api/litellm/sessions/${encodeURIComponent(args.sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: args.text }),
+    },
+  );
+  const json = await parseJson<{ assistantText: string } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  if (!res.ok) throw new Error("Request failed");
+  return json;
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const json = await parseJson<ApiErrorShape>(res);
+    if (isApiError(json)) throw new Error(json.error.message);
+    throw new Error("Request failed");
+  }
 }
 
 export async function stopSession(id: string): Promise<Session> {

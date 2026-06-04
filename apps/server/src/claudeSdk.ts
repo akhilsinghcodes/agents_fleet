@@ -9,11 +9,29 @@ function nowIso() {
 }
 
 export function requireAnthropicKey(): string {
+  const litellmOverride = process.env.LITELLM_API_KEY;
+  if (litellmOverride && litellmOverride.trim().length > 0) {
+    return litellmOverride;
+  }
+
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key || key.trim().length === 0) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
   }
   return key;
+}
+
+export function getBaseUrl(): string | undefined {
+  const litellmOverride = process.env.LITELLM_BASE_URL;
+  if (litellmOverride && litellmOverride.trim().length > 0) {
+    try {
+      URL.canParse(litellmOverride);
+      return litellmOverride;
+    } catch {
+      throw new Error("LITELLM_BASE_URL is not a valid URL");
+    }
+  }
+  return undefined;
 }
 
 export type ClaudeSdkConfigV1 = {
@@ -226,7 +244,8 @@ export async function runClaudeSdkTurn(args: {
     content: [{ type: "text", text: m.text }],
   }));
 
-  const client = new Anthropic({ apiKey: key });
+  const baseURL = getBaseUrl();
+  const client = new Anthropic({ apiKey: key, baseURL });
 
   // Tool definition: request to run a shell command in the repo.
   const tools: Anthropic.Messages.Tool[] = [

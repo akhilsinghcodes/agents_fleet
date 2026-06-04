@@ -125,14 +125,7 @@ export default function TerminalReplay({
         const limit = 2000;
 
         term.reset();
-        // Ensure a blank state similar to a fresh terminal.
-        term.write("\x1b[0m\x1b[H\x1b[2J");
-        // Force alt-screen for replay so TUIs that live there (Claude) render correctly.
-        term.write("\x1b[?1049h");
-
-        // Debug aid: log how much we loaded.
-        // (xterm will ignore this visually if the app switches to alt screen)
-        // term.writeln(`[replay] loading PTY chunks...`);
+        term.write("\x1b[0m");
 
         const before = freezeAtExit
           ? pickFreezeTimestamp(await fetchMarkers(sessionId, ac.signal))
@@ -155,21 +148,19 @@ export default function TerminalReplay({
           };
 
           for (const c of json.chunks) {
-            term.write(c.data);
-            if (c.data.includes("\x1b[?1049l")) {
-              // The app left alt-screen (common on exit). To keep the TUI history visible,
-              // immediately re-enter alt-screen for the remainder of the replay.
-              term.write("\x1b[?1049h");
-            }
+            // Strip alt-screen enter/exit so all output lands in the main
+            // scrollback buffer and the user can scroll through the full history.
+            const sanitized = c.data
+              .replaceAll("\u001b[?1049h", "")
+              .replaceAll("\u001b[?1049l", "")
+              .replaceAll("\u001b[?47h", "")
+              .replaceAll("\u001b[?47l", "");
+            term.write(sanitized);
           }
 
           if (json.chunks.length < limit) break;
           offset += limit;
         }
-
-        // Do NOT force-leave alt screen here.
-        // Many TUIs (including Claude) render their entire UI in alt-screen;
-        // leaving it makes the replay look empty. We'll add a toggle later if desired.
 
         requestAnimationFrame(() => fit.fit());
       } catch (e) {

@@ -1,4 +1,9 @@
-import { getModelPricing, getModelPricingAsync } from "./pricing";
+import {
+  getLiteLlmPricing,
+  getLiteLlmPricingAsync,
+  getModelPricing,
+  getModelPricingAsync,
+} from "./pricing";
 
 // NOTE: These are fallback/default prices used only when we don't have a
 // model-specific entry. Prefer computeModelCostUsd.
@@ -41,5 +46,31 @@ export async function computeModelCostUsdAsync(args: {
   return (
     (args.inputTokens / 1_000_000) * inputPer1M +
     (args.outputTokens / 1_000_000) * outputPer1M
+  );
+}
+
+export function computeLiteLlmModelCostUsd(args: {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}) {
+  const p = getLiteLlmPricing(args.model);
+  if (!p) return null;
+  return (
+    (args.inputTokens / 1_000_000) * p.inputPer1M +
+    (args.outputTokens / 1_000_000) * p.outputPer1M
+  );
+}
+
+export async function computeLiteLlmModelCostUsdAsync(args: {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}) {
+  const p = await getLiteLlmPricingAsync(args.model);
+  if (!p) return null;
+  return (
+    (args.inputTokens / 1_000_000) * p.inputPer1M +
+    (args.outputTokens / 1_000_000) * p.outputPer1M
   );
 }

@@ -53,6 +53,46 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function sanitizePtyUserInputForTokenEstimate(raw: string): string {
+  if (!raw) return "";
+
+  // Drop common non-text keystroke encodings:
+  // - ANSI escape sequences: arrows, function keys, etc. (ESC [ ...)
+  // - OSC sequences: window title, etc. (ESC ] ... BEL or ESC \\)
+  // - Backspace/delete control chars
+  // - Other C0 controls except tab/newline/carriage return
+  let s = raw;
+
+  const ESC = "\u001B";
+  const BEL = "\u0007";
+
+  // Strip ANSI CSI sequences.
+  s = s.replace(new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, "g"), "");
+  // Strip single-character ESC sequences.
+  s = s.replace(new RegExp(`${ESC}[@-Z\\\\-_]`, "g"), "");
+  // Strip OSC sequences.
+  s = s.replace(
+    new RegExp(`${ESC}\\][^${BEL}]*(?:${BEL}|${ESC}\\\\)`, "g"),
+    "",
+  );
+
+  // Remove backspace/delete.
+  s = s.replace(/[\b\u007F]/g, "");
+
+  // Remove other control chars (keep \t, \n, \r).
+  // We do this with a simple pass to avoid regex parser differences around control escapes.
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d)
+      continue;
+    out += s[i];
+  }
+  s = out;
+
+  return s;
+}
+
 function parseCodexUsageTotalsFromText(
   cleanText: string,
 ): { input: number; output: number; source: "summary" | "status" } | null {
@@ -523,6 +563,16 @@ export class ProcessManager {
       // PTY streams include ANSI escape codes (colors, cursor moves, clears) which can wildly
       // inflate token estimates and trigger budgets prematurely. Strip them before estimating.
       const clean = stripAnsi(text);
+
+      // Codex and Claude sessions: do not estimate from output chunks here.
+      // Codex: updated from Codex-reported usage totals in the onData handler.
+      // Claude: updated from authoritative client_rendered_statusline (AF) ticks
+      // via applyUsageTick. Estimating from PTY chunks here would clobber those
+      // values with a lower computed cost.
+      const r = this.running.get(args.sessionId);
+      const cmd = r?.command?.trim();
+      if (cmd === "codex" || cmd === "claude") return;
+
       const outputTokens = estimateTokens(clean);
       if (outputTokens <= 0) return;
       const session = await getSession(args.sessionId);
@@ -778,8 +828,23 @@ export class ProcessManager {
   }
 
   async recordInputAndCount(sessionId: string, rawData: string) {
-    // Count tokens on the full payload (not on the audit log line) to avoid double count.
-    const tokens = estimateTokens(rawData);
+    // IMPORTANT: PTY stdin is a stream of keystrokes.
+    // For Codex, we prefer Codex-reported usage totals parsed from stdout. Do not count stdin.
+    // For Claude, we use the authoritative client_rendered_statusline (AF) tick. Counting
+    // stdin keystrokes here would clobber that cost with a tiny estimate.
+    const running = this.running.get(sessionId);
+    const cmd = running?.command?.trim();
+    if (cmd === "codex" || cmd === "claude") return await getSession(sessionId);
+
+    // Arrow keys and other navigation keys come through as ANSI escape sequences like "\x1B[A".
+    // Backspace comes through as "\x7F" or "\b". These are not model input tokens and should
+    // not be counted as "input tokens" for budget purposes.
+    //
+    // For other PTY sessions, we only count *printable characters* plus newlines/tabs that could
+    // contribute to what the user actually submitted.
+    const tokens = estimateTokens(
+      sanitizePtyUserInputForTokenEstimate(rawData),
+    );
     const session = await getSession(sessionId);
     if (!session) return null;
     const nextIn = session.estimated_input_tokens + tokens;
