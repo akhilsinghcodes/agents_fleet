@@ -21,57 +21,83 @@ This repository contains a **working MVP**:
 
 ### Screenshots
 
-**New session form**
+**Mission control overview**
 
-![New session form](screenshots/New_Session.png)
+![Mission control overview](screenshots/AI_Agent_Mission_Control_System.png)
 
-**Live terminal (interactive agents)**
+**Local-first architecture**
 
-- Claude Code (interactive TUI rendered via xterm.js)
+![Local-first architecture](screenshots/Local_Control_for_AI_Agents.png)
 
-![Claude interactive session](screenshots/claude.png)
+**Create a new session**
 
-- OpenAI Codex (interactive)
+- Shell session
 
-![Codex interactive session](screenshots/codex.png)
+![New shell session](screenshots/New_Session_Shell.jpg)
+
+- Claude (SDK) session
+
+![New Claude SDK session](screenshots/New_Session_Claude_SDK.jpg)
+
+- LiteLLM session
+
+![New LiteLLM session](screenshots/New_Session_LiteLLM.jpg)
+
+**Interactive sessions**
+
+- Claude Code / PTY session
+
+![Claude interactive session](screenshots/claude.jpg)
+
+- OpenAI Codex / PTY session
+
+![Codex interactive session](screenshots/codex.jpg)
+
+- Codex scrollback / persisted terminal replay
+
+![Codex scrollable terminal](screenshots/codex_scrollable_terminal.jpg)
+
+**Claude SDK chat flow**
+
+- Chat conversation view
+
+![Claude SDK chat](screenshots/claude_sdk_Chat.jpg)
+
+- Command approval gate
+
+![Claude SDK approval gate](screenshots/claude_sdk_approval_gate.jpg)
+
+- Approval accepted
+
+![Claude SDK approval accepted](screenshots/claude_sdk_approval_gate_approved.jpg)
+
+- Approval rejected
+
+![Claude SDK approval rejected](screenshots/claude_sdk_approval_gate_rejected.jpg)
+
+- Persisted chat history
+
+![Claude SDK history](screenshots/claude_sdk_History.jpg)
 
 **Per-session artifacts (git diff snapshots)**
 
-- Artifacts tab (changed files + diff)
+- Git diff snapshot
 
-![Artifacts view](screenshots/artifacts_git_snapshot_small.jpg)
+![Git diff snapshot](screenshots/new_git_diff.jpg)
 
-- Artifacts view (larger change set)
+**SQLite persistence / debug views**
 
-![Artifacts view (large change)](screenshots/artifacts_git_snapshot_large.jpg)
-
-**Live output vs persisted terminal history**
-
-- Terminal (live)
-
-![git status live](screenshots/git_status_live.png)
-
-- Terminal (persisted)
-
-![git status persisted logs](screenshots/git_status_logs.png)
-
-**Budget enforcement (auto-stop)**
-
-- Token budget cutoff
-
-![Token budget cutoff](screenshots/cutoff_based_on_tokens.png)
-
-- USD budget cutoff
-
-![USD budget cutoff](screenshots/cutoff_based_on_cost.png)
-
-**Cost estimate vs actual (CLI-reported)**
-
-![Claude actual cost vs estimate](screenshots/claude_Actual_cost_vs_estimate.png)
-
-**SQLite persistence (debug views)**
+- Sessions table
 
 ![sessions table](screenshots/session_table.png)
+
+- Logs table
+
+![logs table](screenshots/logs_table.png)
+
+### Videos
+
+- `screenshots/AgentFleet__Mission_Control_for_Your_Local_AI_Workers.mp4`
 
 The MVP persists several tables in `data/agents_fleet.sqlite`:
 
@@ -220,15 +246,15 @@ Notes:
 Screenshots:
 - Claude SDK session stopped by budget
 
-![Claude SDK budget stop](screenshots/claude_chat_budget.jpg)
+![Claude SDK budget stop](screenshots/claude_sdk_Chat.jpg)
 
 - Claude SDK tool call + output
 
-![Claude SDK tool call](screenshots/claude_chat_tool_call.jpg)
+![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg)
 
 - Claude SDK tool permission gate (Approve/Reject)
 
-![Claude SDK tool permission](screenshots/claude_chat_tool_permission.jpg)
+![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg)
 
 ### LiteLLM Chat (proxy support)
 **Use your enterprise URL and API key to access multiple models through a LiteLLM proxy.**
