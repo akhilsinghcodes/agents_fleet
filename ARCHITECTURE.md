@@ -9,27 +9,22 @@ This project is local-first. The browser UI talks to a local Node server which c
 All modes persist session state + artifacts to SQLite and stream live events back over WebSockets.
 
 ```mermaid
-flowchart TB
-  UI[Browser UI (React + Vite)]
-  S[Local server (Node + Express)]
-  DB[(SQLite: data/agents_fleet.sqlite)]
-  PTY[PTY runner (local command/agent CLI)]
-  SDK[Claude SDK runner (Anthropic)]
-  LLM[LiteLLM chat runner\n(proxy-backed)]
-  REPO[Local repository]
+graph TD
+  UI[Browser UI React Vite] --> S[Local server Node Express]
+  UI -->|HTTP /api| S
+  UI <-->|WebSocket /ws| S
 
-  UI -->|HTTP: /api/...| S
-  UI <-->|WebSocket: /ws| S
+  S --> DB[(SQLite data/agents_fleet.sqlite)]
+  S --> PTY[PTY runner local command agent CLI]
+  S --> SDK[Claude SDK runner Anthropic]
+  S --> LLM[LiteLLM chat runner proxy backed]
+  S --> REPO[Local repository]
 
-  S -->|persist sessions + artifacts| DB
-
-  S -->|spawn + manage| PTY
   PTY -->|runs in cwd| REPO
   PTY -->|PTY output stream| S
-
   S -->|Anthropic SDK messages.create| SDK
-  S -->|OpenAI-compatible chat| LLM
-  S -->|tool: run_command in repo cwd| REPO
+  S -->|OpenAI compatible chat| LLM
+  S -->|tool run_command in repo cwd| REPO
 ```
 
 ## SQLite schema (MVP)
