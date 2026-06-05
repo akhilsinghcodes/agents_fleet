@@ -1,4 +1,4 @@
-# Agents Fleet (prototype)
+# Agents Fleet
 
 [![CI](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml)
 
@@ -11,6 +11,10 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
+- **PR #4: Spend analytics dashboard + session lifecycle improvements**
+  - Added a spend dashboard with breakdowns by day, repo, command, and model
+  - Improved server-side session stopping and timeout handling for chat sessions
+  - Refreshed product docs/screenshots to match the dashboard UI
 - **PR #3: LiteLLM chat + terminal replay improvements**
   - Added LiteLLM-backed chat support with model selection and the same approve/reject tool flow used by Claude SDK
   - Improved persisted PTY replay by stripping alternate-screen escape sequences more reliably
