@@ -109,7 +109,7 @@ This repository contains a **working MVP**:
 
 ### Videos
 
-- `screenshots/AgentFleet__Mission_Control_for_Your_Local_AI_Workers.mp4`
+- `screenshots/AgentFleet__AI_Mission_Control.mp4`
 
 The MVP persists several tables in `data/agents_fleet.sqlite`:
 
