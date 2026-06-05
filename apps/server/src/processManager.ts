@@ -342,6 +342,7 @@ function captureGitArtifactBestEffort(
 const PTY_FLUSH_MS = 50;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_POLL_MS = 15 * 1000;
+const CHAT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 function insertMarker(sessionId: string, kind: string) {
   const timestamp = nowIso();
@@ -488,6 +489,48 @@ export class ProcessManager {
         void this.stopSession(sessionId, "idle_timeout");
       }
     }, IDLE_POLL_MS).unref?.();
+
+    // Auto-complete idle Claude SDK and LiteLLM chat sessions that aren't managed by ProcessManager.running.
+    setInterval(() => {
+      this.autoStopIdleChatSessions();
+    }, IDLE_POLL_MS).unref?.();
+  }
+
+  private async autoStopIdleChatSessions() {
+    const db = getDb();
+    const now = Date.now();
+    const cutoffTime = new Date(now - CHAT_IDLE_TIMEOUT_MS).toISOString();
+
+    // Find running Claude SDK and LiteLLM sessions with no activity in the last 30 minutes.
+    // Activity is defined as the most recent session_artifacts or session markers.
+    const idleSessions = db
+      .prepare(
+        `SELECT s.id, s.command,
+                MAX(sa.timestamp) as last_artifact_ts,
+                MAX(sm.timestamp) as last_marker_ts
+         FROM sessions s
+         LEFT JOIN session_artifacts sa ON s.id = sa.session_id
+         LEFT JOIN session_markers sm ON s.id = sm.session_id
+         WHERE s.status = 'running'
+           AND (s.command = '[claude-sdk]' OR s.command = '[litellm-chat]')
+         GROUP BY s.id
+         HAVING MAX(COALESCE(sa.timestamp, sm.timestamp, s.created_at)) < ?`,
+      )
+      .all(cutoffTime) as Array<{
+      id: string;
+      command: string;
+      last_artifact_ts: string | null;
+      last_marker_ts: string | null;
+    }>;
+
+    for (const session of idleSessions) {
+      const updated = await updateSessionFields(session.id, {
+        status: "exited",
+        ended_at: nowIso(),
+        stop_reason: "idle_timeout",
+      });
+      if (updated) this.hub.broadcastSession(updated);
+    }
   }
 
   private flushPty(sessionId: string) {
@@ -538,6 +581,7 @@ export class ProcessManager {
       cols,
       rows,
       env,
+      handleFlowControl: true,
     });
 
     this.running.set(args.sessionId, {
@@ -734,8 +778,6 @@ export class ProcessManager {
     });
 
     p.onExit(({ exitCode, signal }) => {
-      // Flush any buffered PTY data before we finalize the session.
-      this.flushPty(args.sessionId);
       void (async () => {
         const current = await getSession(args.sessionId);
         const wasStopped = current?.status === "stopped";
@@ -770,11 +812,60 @@ export class ProcessManager {
         this.running.delete(args.sessionId);
       })();
     });
+
+    // Fallback: if process doesn't exit within a reasonable time, force finalization.
+    // This handles cases where the PTY process hangs or onExit doesn't fire.
+    const _fallbackTimeout = setTimeout(() => {
+      if (this.running.has(args.sessionId)) {
+        const pty = this.running.get(args.sessionId);
+        if (pty) {
+          try {
+            pty.pty.kill();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }, 2 * 60 * 1000);
   }
 
   async stopSession(sessionId: string, reason: string = "user_stop") {
     const running = this.running.get(sessionId);
-    if (!running) return await getSession(sessionId);
+
+    // For PTY-based sessions (Shell, Codex), kill the process.
+    if (running) {
+      const updated = await updateSessionFields(sessionId, {
+        status: "stopped",
+        ended_at: nowIso(),
+        stop_reason: reason,
+      });
+      if (updated) this.hub.broadcastSession(updated);
+      // Ensure any buffered output is persisted before we stop.
+      this.flushPty(sessionId);
+      insertMarker(sessionId, "stop_requested");
+      insertPtyChunk(sessionId, "\r\n[system] stop requested\r\n");
+
+      // Capture git state when the user explicitly stops (best-effort).
+      try {
+        captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
+      } catch {
+        // ignore
+      }
+
+      try {
+        running.pty.kill();
+      } catch {
+        // ignore
+      }
+
+      return updated;
+    }
+
+    // For chat-based sessions (Claude SDK, LiteLLM) that aren't in ProcessManager.running,
+    // directly update the DB to mark them as stopped.
+    const session = await getSession(sessionId);
+    if (!session) return null;
+    if (session.status !== "running") return session;
 
     const updated = await updateSessionFields(sessionId, {
       status: "stopped",
@@ -782,24 +873,6 @@ export class ProcessManager {
       stop_reason: reason,
     });
     if (updated) this.hub.broadcastSession(updated);
-    // Ensure any buffered output is persisted before we stop.
-    this.flushPty(sessionId);
-    insertMarker(sessionId, "stop_requested");
-    insertPtyChunk(sessionId, "\r\n[system] stop requested\r\n");
-
-    // Capture git state when the user explicitly stops (best-effort).
-    try {
-      captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
-    } catch {
-      // ignore
-    }
-
-    try {
-      running.pty.kill();
-    } catch {
-      // ignore
-    }
-
     return updated;
   }
 
