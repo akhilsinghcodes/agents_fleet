@@ -17,6 +17,13 @@
 - Budget enforcement for Claude SDK sessions, including within tool loops (done; model-aware cost estimate).
 - Display session id and token usage (input/output; thinking/cache when present via usage artifacts) (done).
 
+### LiteLLM chat (done)
+- Chat-style UI backed by LiteLLM proxy support (done).
+- Model selection in the UI for proxy-backed chat sessions (done).
+- Tool-calling with the same Approve/Reject workflow as Claude SDK (done).
+- Persisted usage/session artifacts for budget enforcement and replay (done).
+- Support enterprise/custom proxy endpoints via `LITELLM_BASE_URL` + `LITELLM_API_KEY` (done).
+
 ## Next (Agent mission control)
 - One-click rerun: restart a historical session (repoPath + command) in a fresh process.
 - Per-session artifacts UX: view/export bundle (diff, changed files list, PTY replay export). (in progress: artifacts tab + JSON diff view)
