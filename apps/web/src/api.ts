@@ -9,6 +9,104 @@ import type {
 
 export type ApiErrorShape = { error: { message: string } };
 
+// ── Dashboard types ──────────────────────────────────────────────────────────
+
+export type DashboardCommandStat = {
+  command: string;
+  session_count: number;
+  total_cost: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_cost: number;
+  min_cost: number;
+  max_cost: number;
+};
+
+export type DashboardStats = {
+  period: { from: string; to: string };
+  totals: {
+    total_sessions: number;
+    total_cost: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    period_budget: number;
+    budget_percent: number;
+  };
+  by_command: DashboardCommandStat[];
+};
+
+export type DashboardSession = {
+  id: string;
+  command: string;
+  created_at: string;
+  ended_at: string | null;
+  status: string;
+  stop_reason: string | null;
+  estimated_input_tokens: number;
+  estimated_output_tokens: number;
+  estimated_cost_usd: number;
+  budget_usd: number | null;
+  artifact_count: number;
+};
+
+export type DashboardRepo = {
+  repo_path: string;
+  stats: {
+    session_count: number;
+    total_cost: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+  };
+  sessions: DashboardSession[];
+};
+
+export type DashboardAlert = {
+  type: "budget_exceeded" | "approaching_budget";
+  session_id: string;
+  command: string;
+  budget: number;
+  spent: number;
+  percent: number;
+};
+
+export type DashboardModelStat = {
+  model: string;
+  command: string;
+  session_count: number;
+  total_cost: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_cost: number;
+  min_cost: number;
+  max_cost: number;
+};
+
+export type DashboardDaySpend = {
+  label: string;
+  date: string;
+  spend: number;
+  isFuture: boolean;
+  isToday: boolean;
+};
+
+export type DashboardAlerts = {
+  alerts: DashboardAlert[];
+  week: {
+    start: string;
+    end: string;
+    spend: number;
+    budget: number;
+    percent: number;
+    days_elapsed: number;
+    days_remaining: number;
+    daily_average: number;
+    projected_week_end: number;
+    will_exceed: boolean;
+    days_until_exceeded: number | null;
+  };
+  daily_spend: DashboardDaySpend[];
+};
+
 async function parseJson<T>(res: Response): Promise<T> {
   const json = (await res.json()) as unknown;
   return json as T;
@@ -202,4 +300,48 @@ export async function getSessionArtifacts(args: {
   if (isApiError(json)) throw new Error(json.error.message);
   if (!res.ok) throw new Error("Request failed");
   return json;
+}
+
+// ── Dashboard API ────────────────────────────────────────────────────────────
+
+function dashboardUrl(path: string, from: string, to: string): string {
+  const u = new URL(`/api/dashboard/${path}`, window.location.origin);
+  u.searchParams.set("from", from);
+  u.searchParams.set("to", to);
+  return u.toString();
+}
+
+export async function getDashboardStats(from: string, to: string): Promise<DashboardStats> {
+  const res = await fetch(dashboardUrl("stats", from, to));
+  const json = await parseJson<DashboardStats | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as DashboardStats;
+}
+
+export async function getDashboardByRepo(from: string, to: string): Promise<{ repos: DashboardRepo[] }> {
+  const res = await fetch(dashboardUrl("sessions/by-repo", from, to));
+  const json = await parseJson<{ repos: DashboardRepo[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as { repos: DashboardRepo[] };
+}
+
+export async function getDashboardByCommand(from: string, to: string): Promise<{ commands: DashboardCommandStat[] }> {
+  const res = await fetch(dashboardUrl("sessions/by-command", from, to));
+  const json = await parseJson<{ commands: DashboardCommandStat[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as { commands: DashboardCommandStat[] };
+}
+
+export async function getDashboardByModel(from: string, to: string): Promise<{ models: DashboardModelStat[] }> {
+  const res = await fetch(dashboardUrl("sessions/by-model", from, to));
+  const json = await parseJson<{ models: DashboardModelStat[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as { models: DashboardModelStat[] };
+}
+
+export async function getDashboardAlerts(from: string, to: string): Promise<DashboardAlerts> {
+  const res = await fetch(dashboardUrl("alerts", from, to));
+  const json = await parseJson<DashboardAlerts | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as DashboardAlerts;
 }

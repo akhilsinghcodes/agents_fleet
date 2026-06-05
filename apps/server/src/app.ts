@@ -5,6 +5,7 @@ import { ProcessManager } from "./processManager";
 import { sessionsRouter } from "./routes/sessions";
 import { claudeSdkRouter } from "./routes/claudeSdk";
 import { liteLlmRouter } from "./routes/litellm";
+import { dashboardRouter } from "./routes/dashboard";
 
 export type AgentsFleetServer = {
   app: Express;
@@ -29,6 +30,7 @@ export function createApp(): AgentsFleetServer {
   app.use("/api", sessionsRouter(processManager));
   app.use("/api", claudeSdkRouter(processManager));
   app.use("/api", liteLlmRouter(processManager));
+  app.use("/api", dashboardRouter());
 
   return { app, hub, processManager };
 }
