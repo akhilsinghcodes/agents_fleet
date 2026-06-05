@@ -7,6 +7,7 @@ import { openWs, type WsServerMessage } from "./ws";
 import TerminalPane from "./TerminalPane";
 import TerminalReplay from "./TerminalReplay";
 import SessionArtifacts from "./SessionArtifacts";
+import Dashboard from "./Dashboard";
 
 type LeftTab = "shell" | "claude_sdk" | "litellm";
 type CenterTab = "terminal" | "logs" | "artifacts";
@@ -84,7 +85,7 @@ function TabBtn({
   );
 }
 
-export default function App() {
+function MainApp({ onDashboard }: { onDashboard: () => void }) {
   const [repoPath, setRepoPath] = useState("");
   const [command, setCommand] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
@@ -233,6 +234,13 @@ export default function App() {
           <span style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginRight: 8, whiteSpace: "nowrap" }}>
             New Session
           </span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={onDashboard}
+            style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #e5e7eb", background: "white", color: "#374151", cursor: "pointer", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", marginRight: 4 }}
+          >
+            📊 Spend Dashboard
+          </button>
           <TabBtn active={leftTab === "shell"} onClick={() => setLeftTab("shell")}>Shell</TabBtn>
           <TabBtn active={leftTab === "claude_sdk"} onClick={() => setLeftTab("claude_sdk")}>
             Claude (SDK)
@@ -639,4 +647,11 @@ export default function App() {
       </aside>
     </div>
   );
+}
+
+export default function App() {
+  const [page, setPage] = useState<"main" | "dashboard">("main");
+  return page === "dashboard"
+    ? <Dashboard onBack={() => setPage("main")} />
+    : <MainApp onDashboard={() => setPage("dashboard")} />;
 }
