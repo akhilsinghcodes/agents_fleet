@@ -340,7 +340,6 @@ function captureGitArtifactBestEffort(
 }
 
 const PTY_FLUSH_MS = 50;
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_POLL_MS = 15 * 1000;
 const CHAT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -481,15 +480,6 @@ export class ProcessManager {
   }
 
   constructor(private readonly hub: SessionWsHub) {
-    // Global idle timeout: stop sessions with no output for a while.
-    setInterval(() => {
-      const now = Date.now();
-      for (const [sessionId, r] of this.running.entries()) {
-        if (now - r.lastOutputAt < IDLE_TIMEOUT_MS) continue;
-        void this.stopSession(sessionId, "idle_timeout");
-      }
-    }, IDLE_POLL_MS).unref?.();
-
     // Auto-complete idle Claude SDK and LiteLLM chat sessions that aren't managed by ProcessManager.running.
     setInterval(() => {
       this.autoStopIdleChatSessions();
@@ -812,21 +802,6 @@ export class ProcessManager {
         this.running.delete(args.sessionId);
       })();
     });
-
-    // Fallback: if process doesn't exit within a reasonable time, force finalization.
-    // This handles cases where the PTY process hangs or onExit doesn't fire.
-    const _fallbackTimeout = setTimeout(() => {
-      if (this.running.has(args.sessionId)) {
-        const pty = this.running.get(args.sessionId);
-        if (pty) {
-          try {
-            pty.pty.kill();
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }, 2 * 60 * 1000);
   }
 
   async stopSession(sessionId: string, reason: string = "user_stop") {
@@ -847,7 +822,11 @@ export class ProcessManager {
 
       // Capture git state when the user explicitly stops (best-effort).
       try {
-        captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
+        captureGitArtifactBestEffort(
+          sessionId,
+          running.repoPath,
+          "git_on_stop",
+        );
       } catch {
         // ignore
       }
