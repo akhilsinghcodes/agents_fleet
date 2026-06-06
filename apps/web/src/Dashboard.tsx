@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useContext, createContext } from "react";
 import type {
   DashboardAlerts,
   DashboardCommandStat,
@@ -16,7 +16,56 @@ import {
   getDashboardStats,
 } from "./api";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+import {
+  createTheme,
+  ThemeProvider,
+  CssBaseline,
+  Box,
+  Typography,
+  Button,
+  ButtonGroup,
+  Chip,
+  CircularProgress,
+  Alert,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TableSortLabel,
+  LinearProgress,
+  Collapse,
+  IconButton,
+  Tooltip,
+  Stack,
+  Divider,
+  useTheme,
+} from "@mui/material";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
+
+// Dashboard manages its own theme context independently from MainApp
+const ColorModeContext = createContext({ toggle: () => {} });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(n: number, decimals = 2) {
   return n.toFixed(decimals);
@@ -48,10 +97,18 @@ function commandLabel(cmd: string) {
   return cmd;
 }
 
-function statusColor(status: string) {
-  if (status === "running") return "#16a34a";
-  if (status === "error") return "#dc2626";
-  return "#9ca3af";
+function commandChipSx(cmd: string) {
+  if (cmd === "[claude-sdk]") return { bgcolor: "#ede9fe", color: "#6d28d9", border: "none" };
+  if (cmd === "[litellm-chat]") return { bgcolor: "#ccfbf1", color: "#0f766e", border: "none" };
+  return { bgcolor: "#e2e8f0", color: "#334155", border: "none" };
+}
+
+function statusChipSx(status: string) {
+  if (status === "running")  return { bgcolor: "#dcfce7", color: "#15803d", border: "none" };
+  if (status === "exited")   return { bgcolor: "#fef3c7", color: "#b45309", border: "none" };
+  if (status === "stopped")  return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
+  if (status === "error")    return { bgcolor: "#fee2e2", color: "#dc2626", border: "none" };
+  return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
 }
 
 // ── Date range helpers ────────────────────────────────────────────────────────
@@ -72,7 +129,10 @@ function presetRange(preset: Preset): { from: string; to: string } {
     return { from: toDateStr(w), to: today };
   }
   if (preset === "month") {
-    return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, to: today };
+    return {
+      from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+      to: today,
+    };
   }
   if (preset === "ytd") {
     return { from: `${now.getFullYear()}-01-01`, to: today };
@@ -80,80 +140,24 @@ function presetRange(preset: Preset): { from: string; to: string } {
   return { from: today, to: today };
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-const base: React.CSSProperties = {
-  fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-  fontSize: 13,
-};
-
-const tableStyle: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: 13,
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "8px 12px",
-  borderBottom: "2px solid #e5e7eb",
-  color: "#6b7280",
-  fontWeight: 600,
-  fontSize: 12,
-  whiteSpace: "nowrap",
-  background: "#fafafa",
-};
-
-const thRightStyle: React.CSSProperties = { ...thStyle, textAlign: "right" };
-
-const tdStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  borderBottom: "1px solid #f3f4f6",
-  verticalAlign: "middle",
-};
-
-const tdRightStyle: React.CSSProperties = { ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" };
-
 // ── Sort helpers ──────────────────────────────────────────────────────────────
 
 type SortDir = "asc" | "desc";
 
-function SortTh({
-  label,
-  field,
-  sort,
-  onSort,
-  right,
-}: {
-  label: string;
-  field: string;
-  sort: { field: string; dir: SortDir };
-  onSort: (f: string) => void;
-  right?: boolean;
-}) {
-  const active = sort.field === field;
-  const arrow = active ? (sort.dir === "asc" ? " ↑" : " ↓") : "";
-  return (
-    <th
-      style={{ ...(right ? thRightStyle : thStyle), cursor: "pointer", userSelect: "none" }}
-      onClick={() => onSort(field)}
-    >
-      {label}
-      <span style={{ color: active ? "#111827" : "#d1d5db", fontSize: 10 }}>{arrow || " ↕"}</span>
-    </th>
-  );
-}
-
 function useSort<T>(data: T[], defaultField: string) {
-  const [sort, setSort] = useState<{ field: string; dir: SortDir }>({ field: defaultField, dir: "desc" });
+  const [sort, setSort] = useState<{ field: string; dir: SortDir }>({
+    field: defaultField,
+    dir: "desc",
+  });
 
   const sorted = useMemo(() => {
     return [...data].sort((a, b) => {
       const av = (a as Record<string, unknown>)[sort.field];
       const bv = (b as Record<string, unknown>)[sort.field];
-      const cmp = typeof av === "number" && typeof bv === "number"
-        ? av - bv
-        : String(av ?? "").localeCompare(String(bv ?? ""));
+      const cmp =
+        typeof av === "number" && typeof bv === "number"
+          ? av - bv
+          : String(av ?? "").localeCompare(String(bv ?? ""));
       return sort.dir === "asc" ? cmp : -cmp;
     });
   }, [data, sort]);
@@ -169,106 +173,202 @@ function useSort<T>(data: T[], defaultField: string) {
   return { sorted, sort, toggle };
 }
 
-// ── By Repo Tab ───────────────────────────────────────────────────────────────
+// ── Stat card ─────────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  sub,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  valueColor?: string;
+}) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Typography
+        variant="caption"
+        sx={{
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          color: "text.secondary",
+        }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        variant="h5"
+        sx={{ fontWeight: 700, lineHeight: 1.2, color: valueColor ?? "text.primary" }}
+      >
+        {value}
+      </Typography>
+      {sub && (
+        <Typography variant="caption" color="text.secondary">
+          {sub}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
+// ── Sessions sub-table ────────────────────────────────────────────────────────
 
 function SessionsTable({ sessions }: { sessions: DashboardSession[] }) {
   const { sorted, sort, toggle } = useSort(sessions, "created_at");
 
+  const cols: { id: string; label: string; numeric?: boolean }[] = [
+    { id: "command", label: "Command" },
+    { id: "status", label: "Status" },
+    { id: "estimated_input_tokens", label: "Input", numeric: true },
+    { id: "estimated_output_tokens", label: "Output", numeric: true },
+    { id: "estimated_cost_usd", label: "Cost", numeric: true },
+    { id: "artifact_count", label: "Artifacts", numeric: true },
+    { id: "created_at", label: "Created" },
+  ];
+
   return (
-    <table style={{ ...tableStyle, marginTop: 0 }}>
-      <thead>
-        <tr>
-          <SortTh label="Command" field="command" sort={sort} onSort={toggle} />
-          <SortTh label="Status" field="status" sort={sort} onSort={toggle} />
-          <SortTh label="Input" field="estimated_input_tokens" sort={sort} onSort={toggle} right />
-          <SortTh label="Output" field="estimated_output_tokens" sort={sort} onSort={toggle} right />
-          <SortTh label="Cost" field="estimated_cost_usd" sort={sort} onSort={toggle} right />
-          <SortTh label="Artifacts" field="artifact_count" sort={sort} onSort={toggle} right />
-          <SortTh label="Created" field="created_at" sort={sort} onSort={toggle} />
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((s) => (
-          <tr key={s.id} style={{ background: "white" }}>
-            <td style={tdStyle}>
-              <span
-                style={{
-                  display: "inline-block",
-                  padding: "2px 7px",
-                  borderRadius: 4,
-                  background: s.command === "[claude-sdk]" ? "#eff6ff" : s.command === "[litellm-chat]" ? "#f0fdf4" : "#f9fafb",
-                  color: s.command === "[claude-sdk]" ? "#1d4ed8" : s.command === "[litellm-chat]" ? "#15803d" : "#374151",
-                  fontSize: 12,
-                  fontWeight: 500,
-                }}
+    <Table size="small" sx={{ tableLayout: "fixed" }}>
+      <TableHead>
+        <TableRow>
+          {cols.map((col) => (
+            <TableCell
+              key={col.id}
+              align={col.numeric ? "right" : "left"}
+              sortDirection={sort.field === col.id ? sort.dir : false}
+              sx={{ whiteSpace: "nowrap", fontWeight: 600, fontSize: 11 }}
+            >
+              <TableSortLabel
+                active={sort.field === col.id}
+                direction={sort.field === col.id ? sort.dir : "desc"}
+                onClick={() => toggle(col.id)}
               >
-                {commandLabel(s.command)}
-              </span>
-            </td>
-            <td style={tdStyle}>
-              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor(s.status), flexShrink: 0, display: "inline-block" }} />
-                <span style={{ color: "#6b7280" }}>{s.status}</span>
-                {s.stop_reason && s.stop_reason !== "process_exit" && (
-                  <span style={{ color: "#9ca3af", fontSize: 11 }}>({s.stop_reason})</span>
-                )}
-              </span>
-            </td>
-            <td style={tdRightStyle}>{fmtTokens(s.estimated_input_tokens)}</td>
-            <td style={tdRightStyle}>{fmtTokens(s.estimated_output_tokens)}</td>
-            <td style={tdRightStyle}>${fmt(s.estimated_cost_usd, 4)}</td>
-            <td style={tdRightStyle}>{s.artifact_count > 0 ? s.artifact_count : "—"}</td>
-            <td style={{ ...tdStyle, color: "#6b7280" }}>{fmtDate(s.created_at)}</td>
-          </tr>
+                {col.label}
+              </TableSortLabel>
+            </TableCell>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {sorted.map((s) => (
+          <TableRow key={s.id} hover>
+            <TableCell>
+              <Chip
+                label={commandLabel(s.command)}
+                size="small"
+                sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(s.command) }}
+              />
+            </TableCell>
+            <TableCell>
+              <Chip
+                label={s.status}
+                size="small"
+                sx={{ fontSize: 11, fontWeight: 700, ...statusChipSx(s.status) }}
+              />
+              {s.stop_reason && s.stop_reason !== "process_exit" && (
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                  ({s.stop_reason})
+                </Typography>
+              )}
+            </TableCell>
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+              {fmtTokens(s.estimated_input_tokens)}
+            </TableCell>
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+              {fmtTokens(s.estimated_output_tokens)}
+            </TableCell>
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+              ${fmt(s.estimated_cost_usd, 4)}
+            </TableCell>
+            <TableCell align="right">
+              {s.artifact_count > 0 ? s.artifact_count : "—"}
+            </TableCell>
+            <TableCell sx={{ color: "text.secondary", fontSize: 12 }}>
+              {fmtDate(s.created_at)}
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
+
+// ── By Repo Tab ───────────────────────────────────────────────────────────────
 
 function RepoRow({ repo, totalCost }: { repo: DashboardRepo; totalCost: number }) {
   const [expanded, setExpanded] = useState(false);
   const pct = totalCost > 0 ? Math.round((repo.stats.total_cost / totalCost) * 100) : 0;
+  const theme = useTheme();
 
   return (
     <>
-      <tr
-        style={{ cursor: "pointer", background: expanded ? "#f9fafb" : "white" }}
+      <TableRow
+        hover
         onClick={() => setExpanded((v) => !v)}
+        sx={{ cursor: "pointer", "& > td": { borderBottom: expanded ? "none" : undefined } }}
       >
-        <td style={tdStyle}>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#9ca3af", transition: "transform 0.15s", display: "inline-block", transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
-            <span style={{ fontWeight: 500 }}>{shortPath(repo.repo_path)}</span>
-            <span style={{ color: "#9ca3af", fontSize: 11 }}>{repo.repo_path}</span>
-          </span>
-        </td>
-        <td style={tdRightStyle}>{repo.stats.session_count}</td>
-        <td style={tdRightStyle}>{fmtTokens(repo.stats.total_input_tokens)}</td>
-        <td style={tdRightStyle}>{fmtTokens(repo.stats.total_output_tokens)}</td>
-        <td style={{ ...tdRightStyle, fontWeight: 600 }}>${fmt(repo.stats.total_cost)}</td>
-        <td style={tdStyle}>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ height: 6, borderRadius: 3, background: "#dbeafe", flex: 1, maxWidth: 80, overflow: "hidden" }}>
-              <span style={{ display: "block", height: "100%", width: `${pct}%`, background: "#3b82f6", borderRadius: 3 }} />
-            </span>
-            <span style={{ fontSize: 11, color: "#6b7280" }}>{pct}%</span>
-          </span>
-        </td>
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={6} style={{ padding: 0, background: "#f9fafb" }}>
-            <div style={{ borderLeft: "3px solid #3b82f6", margin: "0 0 0 24px" }}>
+        <TableCell>
+          <Box display="flex" alignItems="center" gap={0.5}>
+            <IconButton size="small" sx={{ p: 0 }}>
+              {expanded ? (
+                <KeyboardArrowDownIcon fontSize="small" />
+              ) : (
+                <KeyboardArrowRightIcon fontSize="small" />
+              )}
+            </IconButton>
+            <Typography fontWeight={600} fontSize={13}>
+              {shortPath(repo.repo_path)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+              {repo.repo_path}
+            </Typography>
+          </Box>
+        </TableCell>
+        <TableCell align="right">{repo.stats.session_count}</TableCell>
+        <TableCell align="right">{fmtTokens(repo.stats.total_input_tokens)}</TableCell>
+        <TableCell align="right">{fmtTokens(repo.stats.total_output_tokens)}</TableCell>
+        <TableCell align="right">
+          <Typography fontWeight={700} fontSize={13}>
+            ${fmt(repo.stats.total_cost)}
+          </Typography>
+        </TableCell>
+        <TableCell>
+          <Box display="flex" alignItems="center" gap={1}>
+            <LinearProgress
+              variant="determinate"
+              value={pct}
+              sx={{ flex: 1, maxWidth: 80, height: 6, borderRadius: 3 }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {pct}%
+            </Typography>
+          </Box>
+        </TableCell>
+      </TableRow>
+      <TableRow>
+        <TableCell colSpan={6} sx={{ p: 0, border: 0 }}>
+          <Collapse in={expanded} unmountOnExit>
+            <Box
+              sx={{
+                ml: 3,
+                borderLeft: `3px solid ${theme.palette.primary.main}`,
+                bgcolor: "action.hover",
+              }}
+            >
               {repo.sessions.length === 0 ? (
-                <div style={{ padding: "12px 16px", color: "#9ca3af" }}>No sessions in this period.</div>
+                <Typography p={2} color="text.secondary" fontSize={13}>
+                  No sessions in this period.
+                </Typography>
               ) : (
                 <SessionsTable sessions={repo.sessions} />
               )}
-            </div>
-          </td>
-        </tr>
-      )}
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
     </>
   );
 }
@@ -277,32 +377,57 @@ function ByRepoTab({ repos }: { repos: DashboardRepo[] }) {
   const { sorted, sort, toggle } = useSort(repos, "total_cost");
   const totalCost = repos.reduce((s, r) => s + r.stats.total_cost, 0);
 
-  const sortedMapped = sorted.map((r) => r);
-
   if (repos.length === 0) {
-    return <div style={{ padding: 24, color: "#9ca3af" }}>No sessions in this period.</div>;
+    return (
+      <Typography p={3} color="text.secondary">
+        No sessions in this period.
+      </Typography>
+    );
   }
 
+  const cols: { id: string; label: string; numeric?: boolean }[] = [
+    { id: "repo_path", label: "Repository" },
+    { id: "session_count", label: "Sessions", numeric: true },
+    { id: "total_input_tokens", label: "Input Tokens", numeric: true },
+    { id: "total_output_tokens", label: "Output Tokens", numeric: true },
+    { id: "total_cost", label: "Total Cost", numeric: true },
+    { id: "pct", label: "% of Spend" },
+  ];
+
   return (
-    <div style={{ overflow: "auto" }}>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <SortTh label="Repository" field="repo_path" sort={{ field: sort.field, dir: sort.dir }} onSort={(f) => toggle(f === "repo_path" ? "repo_path" : f)} />
-            <SortTh label="Sessions" field="session_count" sort={sort} onSort={toggle} right />
-            <SortTh label="Input Tokens" field="total_input_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Output Tokens" field="total_output_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Total Cost" field="total_cost" sort={sort} onSort={toggle} right />
-            <th style={thStyle}>% of Spend</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedMapped.map((repo) => (
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {cols.map((col) => (
+              <TableCell
+                key={col.id}
+                align={col.numeric ? "right" : "left"}
+                sortDirection={sort.field === col.id ? sort.dir : false}
+                sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                {col.id === "pct" ? (
+                  col.label
+                ) : (
+                  <TableSortLabel
+                    active={sort.field === col.id}
+                    direction={sort.field === col.id ? sort.dir : "desc"}
+                    onClick={() => toggle(col.id)}
+                  >
+                    {col.label}
+                  </TableSortLabel>
+                )}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sorted.map((repo) => (
             <RepoRow key={repo.repo_path} repo={repo} totalCost={totalCost} />
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
@@ -313,203 +438,405 @@ function ByCommandTab({ commands }: { commands: DashboardCommandStat[] }) {
   const totalCost = commands.reduce((s, c) => s + c.total_cost, 0);
 
   if (commands.length === 0) {
-    return <div style={{ padding: 24, color: "#9ca3af" }}>No sessions in this period.</div>;
+    return (
+      <Typography p={3} color="text.secondary">
+        No sessions in this period.
+      </Typography>
+    );
   }
 
+  const cols: { id: string; label: string; numeric?: boolean }[] = [
+    { id: "command", label: "Command" },
+    { id: "session_count", label: "Sessions", numeric: true },
+    { id: "avg_cost", label: "Avg Cost", numeric: true },
+    { id: "min_cost", label: "Min Cost", numeric: true },
+    { id: "max_cost", label: "Max Cost", numeric: true },
+    { id: "total_input_tokens", label: "Input Tokens", numeric: true },
+    { id: "total_output_tokens", label: "Output Tokens", numeric: true },
+    { id: "total_cost", label: "Total Cost", numeric: true },
+    { id: "pct", label: "% of Spend" },
+  ];
+
   return (
-    <div style={{ overflow: "auto" }}>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <SortTh label="Command" field="command" sort={sort} onSort={toggle} />
-            <SortTh label="Sessions" field="session_count" sort={sort} onSort={toggle} right />
-            <SortTh label="Avg Cost" field="avg_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Min Cost" field="min_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Max Cost" field="max_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Input Tokens" field="total_input_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Output Tokens" field="total_output_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Total Cost" field="total_cost" sort={sort} onSort={toggle} right />
-            <th style={thStyle}>% of Spend</th>
-          </tr>
-        </thead>
-        <tbody>
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {cols.map((col) => (
+              <TableCell
+                key={col.id}
+                align={col.numeric ? "right" : "left"}
+                sortDirection={sort.field === col.id ? sort.dir : false}
+                sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                {col.id === "pct" ? (
+                  col.label
+                ) : (
+                  <TableSortLabel
+                    active={sort.field === col.id}
+                    direction={sort.field === col.id ? sort.dir : "desc"}
+                    onClick={() => toggle(col.id)}
+                  >
+                    {col.label}
+                  </TableSortLabel>
+                )}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
           {sorted.map((c) => {
             const pct = totalCost > 0 ? Math.round((c.total_cost / totalCost) * 100) : 0;
             return (
-              <tr key={c.command} style={{ background: "white" }}>
-                <td style={tdStyle}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      padding: "2px 7px",
-                      borderRadius: 4,
-                      background: c.command === "[claude-sdk]" ? "#eff6ff" : c.command === "[litellm-chat]" ? "#f0fdf4" : "#f9fafb",
-                      color: c.command === "[claude-sdk]" ? "#1d4ed8" : c.command === "[litellm-chat]" ? "#15803d" : "#374151",
-                      fontSize: 12,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {commandLabel(c.command)}
-                  </span>
-                </td>
-                <td style={tdRightStyle}>{c.session_count}</td>
-                <td style={tdRightStyle}>${fmt(c.avg_cost, 4)}</td>
-                <td style={tdRightStyle}>${fmt(c.min_cost, 4)}</td>
-                <td style={tdRightStyle}>${fmt(c.max_cost, 4)}</td>
-                <td style={tdRightStyle}>{fmtTokens(c.total_input_tokens)}</td>
-                <td style={tdRightStyle}>{fmtTokens(c.total_output_tokens)}</td>
-                <td style={{ ...tdRightStyle, fontWeight: 600 }}>${fmt(c.total_cost)}</td>
-                <td style={tdStyle}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ height: 6, borderRadius: 3, background: "#dbeafe", flex: 1, maxWidth: 80, overflow: "hidden" }}>
-                      <span style={{ display: "block", height: "100%", width: `${pct}%`, background: "#3b82f6", borderRadius: 3 }} />
-                    </span>
-                    <span style={{ fontSize: 11, color: "#6b7280" }}>{pct}%</span>
-                  </span>
-                </td>
-              </tr>
+              <TableRow key={c.command} hover>
+                <TableCell>
+                  <Chip
+                    label={commandLabel(c.command)}
+                    size="small"
+                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(c.command) }}
+                  />
+                </TableCell>
+                <TableCell align="right">{c.session_count}</TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(c.avg_cost, 4)}
+                </TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(c.min_cost, 4)}
+                </TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(c.max_cost, 4)}
+                </TableCell>
+                <TableCell align="right">{fmtTokens(c.total_input_tokens)}</TableCell>
+                <TableCell align="right">{fmtTokens(c.total_output_tokens)}</TableCell>
+                <TableCell align="right">
+                  <Typography fontWeight={700} fontSize={13}>
+                    ${fmt(c.total_cost)}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <LinearProgress
+                      variant="determinate"
+                      value={pct}
+                      sx={{ flex: 1, maxWidth: 80, height: 6, borderRadius: 3 }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {pct}%
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
-// ── Budget Alerts ─────────────────────────────────────────────────────────────
+// ── By Model Tab ──────────────────────────────────────────────────────────────
+
+function ByModelTab({ models }: { models: DashboardModelStat[] }) {
+  const { sorted, sort, toggle } = useSort(models, "total_cost");
+  const totalCost = models.reduce((s, m) => s + m.total_cost, 0);
+
+  if (models.length === 0) {
+    return (
+      <Typography p={3} color="text.secondary" textAlign="center">
+        No Claude SDK or LiteLLM sessions with model data in this period.
+      </Typography>
+    );
+  }
+
+  const cols: { id: string; label: string; numeric?: boolean }[] = [
+    { id: "model", label: "Model" },
+    { id: "command", label: "Source" },
+    { id: "session_count", label: "Sessions", numeric: true },
+    { id: "avg_cost", label: "Avg Cost", numeric: true },
+    { id: "min_cost", label: "Min Cost", numeric: true },
+    { id: "max_cost", label: "Max Cost", numeric: true },
+    { id: "total_input_tokens", label: "Input Tokens", numeric: true },
+    { id: "total_output_tokens", label: "Output Tokens", numeric: true },
+    { id: "total_cost", label: "Total Cost", numeric: true },
+    { id: "pct", label: "% of Spend" },
+  ];
+
+  return (
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {cols.map((col) => (
+              <TableCell
+                key={col.id}
+                align={col.numeric ? "right" : "left"}
+                sortDirection={sort.field === col.id ? sort.dir : false}
+                sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                {col.id === "pct" ? (
+                  col.label
+                ) : (
+                  <TableSortLabel
+                    active={sort.field === col.id}
+                    direction={sort.field === col.id ? sort.dir : "desc"}
+                    onClick={() => toggle(col.id)}
+                  >
+                    {col.label}
+                  </TableSortLabel>
+                )}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sorted.map((m) => {
+            const pct = totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
+            const outputPerDollar =
+              m.total_cost > 0 ? Math.round(m.total_output_tokens / m.total_cost) : null;
+            return (
+              <TableRow key={`${m.model}-${m.command}`} hover>
+                <TableCell>
+                  <Typography fontWeight={600} fontSize={13}>
+                    {m.model}
+                  </Typography>
+                  {outputPerDollar !== null && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {fmtTokens(outputPerDollar)} output tokens / $1
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={commandLabel(m.command)}
+                    size="small"
+                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(m.command) }}
+                  />
+                </TableCell>
+                <TableCell align="right">{m.session_count}</TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(m.avg_cost, 4)}
+                </TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(m.min_cost, 4)}
+                </TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  ${fmt(m.max_cost, 4)}
+                </TableCell>
+                <TableCell align="right">{fmtTokens(m.total_input_tokens)}</TableCell>
+                <TableCell align="right">{fmtTokens(m.total_output_tokens)}</TableCell>
+                <TableCell align="right">
+                  <Typography fontWeight={700} fontSize={13}>
+                    ${fmt(m.total_cost)}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <LinearProgress
+                      variant="determinate"
+                      value={pct}
+                      sx={{ flex: 1, maxWidth: 80, height: 6, borderRadius: 3 }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {pct}%
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+// ── Weekly Budget Strip ───────────────────────────────────────────────────────
 
 function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
-  const { week } = data;
-  if (!week || week.daily_average === 0) return null;
-  const accentColor = week.will_exceed ? "#dc2626" : "#16a34a";
+  const { week, daily_spend } = data;
+  const hasAnySpend = daily_spend.some((d) => d.spend > 0);
+  if (!week || (!hasAnySpend && week.spend === 0)) return null;
+
+  const pctColor =
+    week.percent >= 90 ? "error" : week.percent >= 70 ? "warning" : "primary";
+
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "auto 1fr auto auto",
-      alignItems: "center",
-      gap: 28,
-      padding: "16px 24px",
-      background: "white",
-      borderBottom: "1px solid #e5e7eb",
-    }}>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Weekly Budget</div>
-        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+    <Paper
+      variant="outlined"
+      sx={{
+        display: "grid",
+        gridTemplateColumns: "auto 1fr auto auto",
+        alignItems: "center",
+        gap: 3.5,
+        px: 3,
+        py: 2,
+        borderRadius: 0,
+        borderLeft: 0,
+        borderRight: 0,
+      }}
+    >
+      {/* Label */}
+      <Box>
+        <Typography fontWeight={600} fontSize={13}>
+          Weekly Budget
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
           {week.days_elapsed} of 7 days · {week.start} – {week.end}
-        </div>
-      </div>
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
-          <span>
-            <span style={{ fontWeight: 700, color: "#111827" }}>${fmt(week.spend)}</span>
-            <span style={{ color: "#9ca3af" }}> / ${fmt(week.budget)}</span>
-          </span>
-          <span style={{ fontWeight: 600, color: week.percent >= 90 ? "#dc2626" : week.percent >= 70 ? "#d97706" : "#6b7280" }}>
+        </Typography>
+      </Box>
+
+      {/* Progress bar */}
+      <Box>
+        <Box display="flex" justifyContent="space-between" mb={0.75}>
+          <Typography fontSize={13}>
+            <Typography component="span" fontWeight={700}>
+              ${fmt(week.spend)}
+            </Typography>
+            <Typography component="span" color="text.secondary">
+              {" "}/ ${fmt(week.budget)}
+            </Typography>
+          </Typography>
+          <Typography
+            fontSize={13}
+            fontWeight={600}
+            color={`${pctColor}.main`}
+          >
             {week.percent}%
-          </span>
-        </div>
-        <div style={{ height: 8, borderRadius: 4, background: "#f3f4f6", overflow: "hidden" }}>
-          <div style={{
-            height: "100%",
-            width: `${Math.min(100, week.percent)}%`,
-            borderRadius: 4,
-            background: week.percent >= 90 ? "#ef4444" : week.percent >= 70 ? "#f59e0b" : "#3b82f6",
-            transition: "width 0.4s ease",
-          }} />
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 32 }}>
-        {([
-          { label: "Avg / day", value: `$${fmt(week.daily_average)}`, highlight: false },
-          { label: "Projected", value: `$${fmt(week.projected_week_end)}`, highlight: week.will_exceed },
-          { label: "Remaining", value: `$${fmt(Math.max(0, week.budget - week.spend))}`, highlight: false },
-        ] as { label: string; value: string; highlight: boolean }[]).map(({ label, value, highlight }) => (
-          <div key={label} style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: "#9ca3af" }}>{label}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: highlight ? "#dc2626" : "#111827", lineHeight: 1.3 }}>{value}</div>
-          </div>
+          </Typography>
+        </Box>
+        <LinearProgress
+          variant="determinate"
+          value={Math.min(100, week.percent)}
+          color={pctColor}
+          sx={{ height: 8, borderRadius: 4 }}
+        />
+      </Box>
+
+      {/* Metrics */}
+      <Stack direction="row" gap={4}>
+        {(
+          [
+            { label: "Avg / day", value: `$${fmt(week.daily_average)}`, alert: false },
+            {
+              label: "Projected",
+              value: `$${fmt(week.projected_week_end)}`,
+              alert: week.will_exceed,
+            },
+            {
+              label: "Remaining",
+              value: `$${fmt(Math.max(0, week.budget - week.spend))}`,
+              alert: false,
+            },
+          ] as { label: string; value: string; alert: boolean }[]
+        ).map(({ label, value, alert }) => (
+          <Box key={label} textAlign="right">
+            <Typography variant="caption" color="text.secondary" display="block">
+              {label}
+            </Typography>
+            <Typography
+              fontSize={18}
+              fontWeight={700}
+              color={alert ? "error.main" : "text.primary"}
+              lineHeight={1.3}
+            >
+              {value}
+            </Typography>
+          </Box>
         ))}
-      </div>
-      <div style={{
-        fontSize: 13, fontWeight: 600, color: accentColor,
-        background: week.will_exceed ? "#fef2f2" : "#f0fdf4",
-        border: `1px solid ${week.will_exceed ? "#fecaca" : "#bbf7d0"}`,
-        padding: "6px 14px", borderRadius: 20, whiteSpace: "nowrap",
-      }}>
-        {week.will_exceed && week.days_until_exceeded !== null
-          ? `⚠️ Exceeds in ${week.days_until_exceeded}d`
-          : `✓ On track`}
-      </div>
-    </div>
+      </Stack>
+
+      {/* Badge */}
+      <Chip
+        icon={
+          week.will_exceed ? (
+            <WarningAmberIcon fontSize="small" />
+          ) : (
+            <CheckCircleOutlineIcon fontSize="small" />
+          )
+        }
+        label={
+          week.will_exceed && week.days_until_exceeded !== null
+            ? `Exceeds in ${week.days_until_exceeded}d`
+            : "On track"
+        }
+        color={week.will_exceed ? "error" : "success"}
+        variant="outlined"
+        sx={{ fontWeight: 600 }}
+      />
+    </Paper>
   );
 }
+
+// ── Weekly Spend Chart (Recharts) ─────────────────────────────────────────────
 
 function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
   const { week, daily_spend } = data;
-  if (!week || week.daily_average === 0) return null;
+  const theme = useTheme();
 
-  // Dimensions are in viewBox units. At 480px container width this renders at
-  // 480 × (480/440 * 220) ≈ 480 × 240px — tall enough to fill the header.
-  const VB_W = 700;
-  const CHART_H = 65;
-  const LABEL_H = 20;
-  const PTOP = 20;
-  const BAR_GAP = 14;
-  const BAR_W = (VB_W - BAR_GAP * 6) / 7;
-  const totalH = PTOP + CHART_H + LABEL_H;
+  const hasAnySpend = daily_spend.some((d) => d.spend > 0);
+  if (!week || (!hasAnySpend && week.spend === 0)) return null;
 
-  const maxSpend = Math.max(...daily_spend.map((d) => d.spend), week.budget / 7, 0.001);
-  const budgetLineY = PTOP + CHART_H - (week.budget / 7 / maxSpend) * CHART_H;
+  // Compute a local daily average in case backend returns 0
+  const localDailyAvg =
+    week.daily_average > 0
+      ? week.daily_average
+      : week.days_elapsed > 0
+      ? week.spend / week.days_elapsed
+      : 0;
 
-  const barColor = (d: DashboardDaySpend) => {
-    if (d.isFuture) return "#e5e7eb";
-    if (d.isToday) return week.will_exceed ? "#f87171" : "#3b82f6";
-    return week.will_exceed ? "#fca5a5" : "#93c5fd";
-  };
+  const chartData = daily_spend.map((d: DashboardDaySpend) => ({
+    ...d,
+    displaySpend: d.isFuture ? localDailyAvg : d.spend,
+  }));
+
+  const budgetPerDay = week.budget / 7;
+
+  function barFill(d: DashboardDaySpend) {
+    if (d.isFuture) return theme.palette.action.disabledBackground;
+    if (d.isToday) return week.will_exceed ? theme.palette.error.main : theme.palette.primary.main;
+    return week.will_exceed ? theme.palette.error.light : theme.palette.primary.light;
+  }
 
   return (
-    <svg
-      viewBox={`0 0 ${VB_W} ${totalH}`}
-      width="100%"
-      style={{ display: "block" }}
-    >
-      {/* Daily target dashed line */}
-      <line x1={0} y1={budgetLineY} x2={VB_W} y2={budgetLineY} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="5 4" />
-      <text x={VB_W} y={budgetLineY - 4} textAnchor="end" fontSize={10} fill="#d1d5db">
-        {`$${fmt(week.budget / 7)}/day`}
-      </text>
-
-      {daily_spend.map((d, i) => {
-        const spendValue = d.isFuture ? week.daily_average : d.spend;
-        const barH = Math.max(3, (spendValue / maxSpend) * CHART_H);
-        const x = i * (BAR_W + BAR_GAP);
-        const y = PTOP + CHART_H - barH;
-        return (
-          <g key={d.date}>
-            <rect x={x} y={y} width={BAR_W} height={barH} rx={4} fill={barColor(d)} opacity={d.isFuture ? 0.3 : 1} />
-            {!d.isFuture && d.spend > 0 && (
-              <text x={x + BAR_W / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={600} fill="#374151">
-                {`$${d.spend < 0.01 ? d.spend.toFixed(3) : d.spend.toFixed(2)}`}
-              </text>
-            )}
-            <text
-              x={x + BAR_W / 2} y={PTOP + CHART_H + 17}
-              textAnchor="middle" fontSize={11}
-              fontWeight={d.isToday ? 700 : 400}
-              fill={d.isToday ? "#111827" : "#9ca3af"}
-            >
-              {d.label}
-            </text>
-            {d.isToday && (
-              <circle cx={x + BAR_W / 2} cy={PTOP + CHART_H + 23} r={2.5} fill="#3b82f6" />
-            )}
-          </g>
-        );
-      })}
-    </svg>
+    <ResponsiveContainer width="100%" height={110}>
+      <BarChart data={chartData} barCategoryGap="20%" margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: theme.palette.text.secondary }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis hide />
+        <RechartsTooltip
+          formatter={(value: number) => [`$${(value as number).toFixed(4)}`, "Spend"]}
+          contentStyle={{
+            background: theme.palette.background.paper,
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 8,
+            fontSize: 12,
+          }}
+        />
+        {budgetPerDay > 0 && (
+          <ReferenceLine
+            y={budgetPerDay}
+            stroke={theme.palette.divider}
+            strokeDasharray="5 4"
+            label={`$${fmt(budgetPerDay)}/day`}
+          />
+        )}
+        <Bar dataKey="displaySpend" radius={[4, 4, 0, 0]}>
+          {chartData.map((entry, index) => (
+            <Cell
+              key={`cell-${index}`}
+              fill={barFill(entry)}
+              opacity={entry.isFuture ? 0.35 : 1}
+            />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
-
 
 // ── Dashboard Header ──────────────────────────────────────────────────────────
 
@@ -538,186 +865,121 @@ function DashboardHeader({
     { key: "custom", label: "Custom" },
   ];
 
-  const btnStyle = (active: boolean): React.CSSProperties => ({
-    padding: "4px 12px",
-    borderRadius: 6,
-    border: "1px solid #e5e7eb",
-    background: active ? "#111827" : "white",
-    color: active ? "white" : "#374151",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: active ? 600 : 400,
-  });
-
   return (
-    <div style={{ padding: "16px 24px", background: "white" }}>
+    <Box p={3}>
       {/* Title row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Spend Analytics</h1>
+      <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+        <Typography variant="h6" fontWeight={700}>
+          Spend Analytics
+        </Typography>
         {stats && (
-          <span style={{ fontSize: 13, color: "#6b7280" }}>
+          <Typography variant="body2" color="text.secondary">
             {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
-          </span>
+          </Typography>
         )}
-      </div>
+      </Box>
 
       {/* Preset buttons */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {presets.map((p) => (
-          <button key={p.key} style={btnStyle(preset === p.key)} onClick={() => onPreset(p.key)}>
-            {p.label}
-          </button>
-        ))}
-        {preset === "custom" && (
-          <span style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
-            <input type="date" value={from} onChange={(e) => onCustomFrom(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px", fontSize: 13 }} />
-            <span style={{ color: "#9ca3af" }}>→</span>
-            <input type="date" value={to} onChange={(e) => onCustomTo(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 8px", fontSize: 13 }} />
-          </span>
-        )}
-      </div>
+      <Box display="flex" alignItems="center" gap={1} mb={2} flexWrap="wrap">
+        <ButtonGroup size="small" variant="outlined">
+          {presets.map((p) => (
+            <Button
+              key={p.key}
+              variant={preset === p.key ? "contained" : "outlined"}
+              onClick={() => onPreset(p.key)}
+              disableElevation
+            >
+              {p.label}
+            </Button>
+          ))}
+        </ButtonGroup>
 
-      {/* Stats summary */}
+        {preset === "custom" && (
+          <Box display="flex" alignItems="center" gap={1} ml={1}>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => onCustomFrom(e.target.value)}
+              style={{
+                border: "1px solid",
+                borderColor: "rgba(0,0,0,0.23)",
+                borderRadius: 6,
+                padding: "5px 8px",
+                fontSize: 13,
+                background: "transparent",
+                color: "inherit",
+              }}
+            />
+            <Typography color="text.secondary">→</Typography>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => onCustomTo(e.target.value)}
+              style={{
+                border: "1px solid",
+                borderColor: "rgba(0,0,0,0.23)",
+                borderRadius: 6,
+                padding: "5px 8px",
+                fontSize: 13,
+                background: "transparent",
+                color: "inherit",
+              }}
+            />
+          </Box>
+        )}
+      </Box>
+
+      {/* Stats row */}
       {stats && (
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <Stat label="Total Spend" value={`$${fmt(stats.totals.total_cost)}`} />
-          <Stat label="Sessions" value={String(stats.totals.total_sessions)} />
-          <Stat label="Input Tokens" value={fmtTokens(stats.totals.total_input_tokens)} />
-          <Stat label="Output Tokens" value={fmtTokens(stats.totals.total_output_tokens)} />
+        <Stack direction="row" gap={4} flexWrap="wrap">
+          <StatCard label="Total Spend" value={`$${fmt(stats.totals.total_cost)}`} />
+          <StatCard label="Sessions" value={String(stats.totals.total_sessions)} />
+          <StatCard label="Input Tokens" value={fmtTokens(stats.totals.total_input_tokens)} />
+          <StatCard label="Output Tokens" value={fmtTokens(stats.totals.total_output_tokens)} />
           {stats.totals.period_budget > 0 && (
-            <Stat
+            <StatCard
               label="Budget Used"
               value={`${stats.totals.budget_percent}%`}
-              valueColor={stats.totals.budget_percent >= 90 ? "#dc2626" : stats.totals.budget_percent >= 70 ? "#d97706" : "#16a34a"}
+              valueColor={
+                stats.totals.budget_percent >= 90
+                  ? "error.main"
+                  : stats.totals.budget_percent >= 70
+                  ? "warning.main"
+                  : "success.main"
+              }
               sub={`$${fmt(stats.totals.total_cost)} / $${fmt(stats.totals.period_budget)}`}
             />
           )}
-          {/* Per-command breakdown inline */}
           {stats.by_command.slice(0, 4).map((c) => (
-            <Stat key={c.command} label={commandLabel(c.command)} value={`$${fmt(c.total_cost)}`} sub={`${c.session_count} sessions`} />
+            <StatCard
+              key={c.command}
+              label={commandLabel(c.command)}
+              value={`$${fmt(c.total_cost)}`}
+              sub={`${c.session_count} sessions`}
+            />
           ))}
-        </div>
+        </Stack>
       )}
-    </div>
+    </Box>
   );
 }
 
-function Stat({ label, value, sub, valueColor }: { label: string; value: string; sub?: string; valueColor?: string }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ fontSize: 20, fontWeight: 700, color: valueColor ?? "#111827", lineHeight: 1 }}>{value}</span>
-      {sub && <span style={{ fontSize: 11, color: "#6b7280" }}>{sub}</span>}
-    </div>
-  );
-}
-
-// ── By Model Tab ─────────────────────────────────────────────────────────────
-
-function modelSourceBadge(command: string) {
-  if (command === "[claude-sdk]")
-    return { label: "Claude SDK", bg: "#eff6ff", color: "#1d4ed8" };
-  if (command === "[litellm-chat]")
-    return { label: "LiteLLM", bg: "#f0fdf4", color: "#15803d" };
-  return { label: command, bg: "#f9fafb", color: "#374151" };
-}
-
-function ByModelTab({ models }: { models: DashboardModelStat[] }) {
-  const { sorted, sort, toggle } = useSort(models, "total_cost");
-  const totalCost = models.reduce((s, m) => s + m.total_cost, 0);
-
-  if (models.length === 0) {
-    return (
-      <div style={{ padding: 32, color: "#9ca3af", textAlign: "center" }}>
-        No Claude SDK or LiteLLM sessions with model data in this period.
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ overflow: "auto" }}>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <SortTh label="Model" field="model" sort={sort} onSort={toggle} />
-            <SortTh label="Source" field="command" sort={sort} onSort={toggle} />
-            <SortTh label="Sessions" field="session_count" sort={sort} onSort={toggle} right />
-            <SortTh label="Avg Cost" field="avg_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Min Cost" field="min_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Max Cost" field="max_cost" sort={sort} onSort={toggle} right />
-            <SortTh label="Input Tokens" field="total_input_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Output Tokens" field="total_output_tokens" sort={sort} onSort={toggle} right />
-            <SortTh label="Total Cost" field="total_cost" sort={sort} onSort={toggle} right />
-            <th style={thStyle}>% of Spend</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((m) => {
-            const pct = totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
-            const badge = modelSourceBadge(m.command);
-            const outputPerDollar =
-              m.total_cost > 0 ? Math.round(m.total_output_tokens / m.total_cost) : null;
-            return (
-              <tr key={`${m.model}-${m.command}`} style={{ background: "white" }}>
-                <td style={tdStyle}>
-                  <span style={{ fontWeight: 500, color: "#111827" }}>{m.model}</span>
-                  {outputPerDollar !== null && (
-                    <span style={{ display: "block", fontSize: 11, color: "#9ca3af" }}>
-                      {fmtTokens(outputPerDollar)} output tokens / $1
-                    </span>
-                  )}
-                </td>
-                <td style={tdStyle}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      padding: "2px 7px",
-                      borderRadius: 4,
-                      background: badge.bg,
-                      color: badge.color,
-                      fontSize: 12,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {badge.label}
-                  </span>
-                </td>
-                <td style={tdRightStyle}>{m.session_count}</td>
-                <td style={tdRightStyle}>${fmt(m.avg_cost, 4)}</td>
-                <td style={tdRightStyle}>${fmt(m.min_cost, 4)}</td>
-                <td style={tdRightStyle}>${fmt(m.max_cost, 4)}</td>
-                <td style={tdRightStyle}>{fmtTokens(m.total_input_tokens)}</td>
-                <td style={tdRightStyle}>{fmtTokens(m.total_output_tokens)}</td>
-                <td style={{ ...tdRightStyle, fontWeight: 600 }}>${fmt(m.total_cost)}</td>
-                <td style={tdStyle}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ height: 6, borderRadius: 3, background: "#dbeafe", flex: 1, maxWidth: 80, overflow: "hidden" }}>
-                      <span style={{ display: "block", height: "100%", width: `${pct}%`, background: "#3b82f6", borderRadius: 3 }} />
-                    </span>
-                    <span style={{ fontSize: 11, color: "#6b7280" }}>{pct}%</span>
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── Main Dashboard Component ──────────────────────────────────────────────────
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 
 type DashTab = "by_repo" | "by_command" | "by_model";
 
-export default function Dashboard({ onBack }: { onBack: () => void }) {
+function DashboardInner({ onBack }: { onBack: () => void }) {
+  const colorMode = useContext(ColorModeContext);
+  const theme = useTheme();
+
   const [preset, setPreset] = useState<Preset>("month");
   const [customFrom, setCustomFrom] = useState(() => toDateStr(new Date()));
   const [customTo, setCustomTo] = useState(() => toDateStr(new Date()));
 
-  const { from, to } = preset === "custom"
-    ? { from: customFrom, to: customTo }
-    : presetRange(preset);
+  const { from, to } =
+    preset === "custom"
+      ? { from: customFrom, to: customTo }
+      : presetRange(preset);
 
   const [tab, setTab] = useState<DashTab>("by_repo");
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -751,39 +1013,69 @@ export default function Dashboard({ onBack }: { onBack: () => void }) {
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  const tabBtn = (key: DashTab, label: string) => (
-    <button
-      onClick={() => setTab(key)}
-      style={{
-        padding: "8px 16px",
-        border: "none",
-        borderBottom: tab === key ? "2px solid #111827" : "2px solid transparent",
-        background: "transparent",
-        color: tab === key ? "#111827" : "#6b7280",
-        cursor: "pointer",
-        fontSize: 13,
-        fontWeight: tab === key ? 600 : 400,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </button>
-  );
+  const tabs: { key: DashTab; label: string }[] = [
+    { key: "by_repo", label: "By Repo" },
+    { key: "by_command", label: "By Command" },
+    { key: "by_model", label: "By Model" },
+  ];
 
   return (
-    <div style={{ ...base, height: "100vh", display: "flex", flexDirection: "column", background: "#f9fafb" }}>
-      {/* Back nav */}
-      <div style={{ padding: "8px 24px", background: "white", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8 }}>
-        <button
+    <Box
+      sx={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: "background.default",
+        overflow: "hidden",
+      }}
+    >
+      {/* Top nav bar */}
+      <Paper
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          borderRadius: 0,
+          px: 3,
+          py: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+        }}
+      >
+        <Button
+          startIcon={<ArrowBackIcon />}
           onClick={onBack}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", fontSize: 13, display: "flex", alignItems: "center", gap: 4, padding: 0 }}
+          size="small"
+          color="inherit"
+          sx={{ textTransform: "none", color: "text.secondary" }}
         >
-          ← Back to sessions
-        </button>
-      </div>
+          Back to sessions
+        </Button>
+        <Box flex={1} />
+        <Tooltip title={`Switch to ${theme.palette.mode === "dark" ? "light" : "dark"} mode`}>
+          <IconButton onClick={colorMode.toggle} size="small">
+            {theme.palette.mode === "dark" ? (
+              <LightModeIcon fontSize="small" />
+            ) : (
+              <DarkModeIcon fontSize="small" />
+            )}
+          </IconButton>
+        </Tooltip>
+      </Paper>
 
-      {/* Header — left: title/presets/metrics, right: weekly spend chart */}
-      <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "stretch" }}>
+      {/* Header: metrics (left) + weekly chart (right) */}
+      <Paper
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          borderRadius: 0,
+          display: "grid",
+          gridTemplateColumns: "auto 1fr",
+          alignItems: "stretch",
+        }}
+      >
         <DashboardHeader
           stats={stats}
           from={from}
@@ -801,39 +1093,134 @@ export default function Dashboard({ onBack }: { onBack: () => void }) {
           onCustomTo={setCustomTo}
         />
         {alerts && (
-          <div style={{ borderLeft: "1px solid #f3f4f6", padding: "14px 20px 12px" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+          <Box sx={{ borderLeft: 1, borderColor: "divider", p: 2 }}>
+            <Typography
+              variant="caption"
+              fontWeight={600}
+              color="text.secondary"
+              textTransform="uppercase"
+              letterSpacing="0.07em"
+              display="block"
+              mb={1}
+            >
               This Week
-            </div>
+            </Typography>
             <WeeklySpendChart data={alerts} />
-          </div>
+          </Box>
         )}
-      </div>
+      </Paper>
 
-      {/* Weekly budget strip — between metrics and tabs */}
+      {/* Budget strip */}
       {alerts && <WeeklyBudgetStrip data={alerts} />}
 
-      {/* Tabs */}
-      <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", padding: "0 24px", display: "flex", gap: 4 }}>
-        {tabBtn("by_repo", "By Repo")}
-        {tabBtn("by_command", "By Command")}
-        {tabBtn("by_model", "By Model")}
-      </div>
+      {/* Tab bar */}
+      <Paper
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          borderRadius: 0,
+          px: 3,
+          display: "flex",
+          gap: 0.5,
+        }}
+      >
+        {tabs.map(({ key, label }) => (
+          <Button
+            key={key}
+            onClick={() => setTab(key)}
+            disableRipple={false}
+            sx={{
+              textTransform: "none",
+              borderRadius: 0,
+              px: 2,
+              py: 1.25,
+              fontSize: 13,
+              fontWeight: tab === key ? 700 : 400,
+              color: tab === key ? "primary.main" : "text.secondary",
+              borderBottom: tab === key ? 2 : 2,
+              borderColor: tab === key ? "primary.main" : "transparent",
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </Paper>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: "auto", background: "white", margin: "16px", borderRadius: 8, border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" }}>
-        {loading && (
-          <div style={{ padding: 32, color: "#9ca3af", textAlign: "center" }}>Loading…</div>
-        )}
-        {error && (
-          <div style={{ padding: 24, color: "#dc2626", background: "#fef2f2", margin: 16, borderRadius: 6 }}>
-            Error: {error}
-          </div>
-        )}
-        {!loading && !error && tab === "by_repo" && <ByRepoTab repos={repos} />}
-        {!loading && !error && tab === "by_command" && <ByCommandTab commands={commands} />}
-        {!loading && !error && tab === "by_model" && <ByModelTab models={models} />}
-      </div>
-    </div>
+      <Box
+        sx={{
+          flex: 1,
+          overflow: "auto",
+          p: 2,
+        }}
+      >
+        <Paper
+          variant="outlined"
+          sx={{ minHeight: "100%", borderRadius: 2, overflow: "hidden" }}
+        >
+          {loading && (
+            <Box p={4} display="flex" justifyContent="center">
+              <CircularProgress size={28} />
+            </Box>
+          )}
+          {error && (
+            <Alert severity="error" sx={{ m: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {!loading && !error && tab === "by_repo" && <ByRepoTab repos={repos} />}
+          {!loading && !error && tab === "by_command" && (
+            <ByCommandTab commands={commands} />
+          )}
+          {!loading && !error && tab === "by_model" && <ByModelTab models={models} />}
+        </Paper>
+      </Box>
+    </Box>
+  );
+}
+
+// ── Root with its own ThemeProvider + toggle ──────────────────────────────────
+
+export default function Dashboard({ onBack }: { onBack: () => void }) {
+  const [mode, setMode] = useState<"light" | "dark">("light");
+
+  const colorMode = useMemo(
+    () => ({ toggle: () => setMode((prev) => (prev === "light" ? "dark" : "light")) }),
+    [],
+  );
+
+  const theme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode,
+          ...(mode === "dark"
+            ? { background: { default: "#0f1117", paper: "#1a1d27" }, primary: { main: "#6366f1" } }
+            : { background: { default: "#f9fafb", paper: "#ffffff" }, primary: { main: "#4f46e5" } }),
+        },
+        typography: { fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" },
+        components: {
+          MuiTableCell: {
+            styleOverrides: {
+              root: { fontSize: 13 },
+              head: { fontWeight: 600, backgroundColor: "transparent" },
+            },
+          },
+          MuiChip: { styleOverrides: { root: { height: 22 } } },
+          MuiButton: { defaultProps: { disableElevation: true } },
+        },
+      }),
+    [mode],
+  );
+
+  return (
+    <ColorModeContext.Provider value={colorMode}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <DashboardInner onBack={onBack} />
+      </ThemeProvider>
+    </ColorModeContext.Provider>
   );
 }
