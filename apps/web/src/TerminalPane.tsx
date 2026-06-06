@@ -31,15 +31,33 @@ function parseClaudeStatuslineFromRenderedRow(rowText: string): {
     return { inputTokens, outputTokens, costUsd };
   }
 
-  // Fall back to the legacy format.
-  const m2 = rowText.match(
+  // Pipe-delimited format emitted by newer Claude Code builds:
+  // "AF|ctx=24110/200000(12%)|in=24110|out=194|cost=$0.010441"
+  if (/\bAF\|/.test(rowText)) {
+    const inM = rowText.match(/\bAF\|.*?\bin=(\d+)/i);
+    const outM = rowText.match(/\bAF\|.*?\bout=(\d+)/i);
+    const costM = rowText.match(/\bAF\|.*?\bcost=\$?([0-9]+(?:\.[0-9]+)?)/i);
+    if (inM && outM) {
+      const inputTokens = Number(inM[1]);
+      const outputTokens = Number(outM[1]);
+      const costUsd = costM ? Number(costM[1]) : undefined;
+      if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+      if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
+      if (costUsd !== undefined && (!Number.isFinite(costUsd) || costUsd < 0))
+        return null;
+      return { inputTokens, outputTokens, costUsd };
+    }
+  }
+
+  // Legacy bracket format: "[AF] ... in=N ... out=N ... [/AF]"
+  const m3 = rowText.match(
     /\[AF\][\s\S]*?\bin=(\d+)\b[\s\S]*?\bout=(\d+)\b(?:[\s\S]*?\bcost=\$?([0-9]+(?:\.[0-9]+)?))?[\s\S]*?\[\/AF\]/i,
   );
-  if (!m2) return null;
+  if (!m3) return null;
 
-  const inputTokens = Number(m2[1]);
-  const outputTokens = Number(m2[2]);
-  const costUsd = m2[3] ? Number(m2[3]) : undefined;
+  const inputTokens = Number(m3[1]);
+  const outputTokens = Number(m3[2]);
+  const costUsd = m3[3] ? Number(m3[3]) : undefined;
   if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
   if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
   if (costUsd !== undefined && (!Number.isFinite(costUsd) || costUsd < 0))
