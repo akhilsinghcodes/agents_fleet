@@ -481,15 +481,6 @@ export class ProcessManager {
   }
 
   constructor(private readonly hub: SessionWsHub) {
-    // Global idle timeout: stop sessions with no output for a while.
-    setInterval(() => {
-      const now = Date.now();
-      for (const [sessionId, r] of this.running.entries()) {
-        if (now - r.lastOutputAt < IDLE_TIMEOUT_MS) continue;
-        void this.stopSession(sessionId, "idle_timeout");
-      }
-    }, IDLE_POLL_MS).unref?.();
-
     // Auto-complete idle Claude SDK and LiteLLM chat sessions that aren't managed by ProcessManager.running.
     setInterval(() => {
       this.autoStopIdleChatSessions();
@@ -812,21 +803,6 @@ export class ProcessManager {
         this.running.delete(args.sessionId);
       })();
     });
-
-    // Fallback: if process doesn't exit within a reasonable time, force finalization.
-    // This handles cases where the PTY process hangs or onExit doesn't fire.
-    const _fallbackTimeout = setTimeout(() => {
-      if (this.running.has(args.sessionId)) {
-        const pty = this.running.get(args.sessionId);
-        if (pty) {
-          try {
-            pty.pty.kill();
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }, 2 * 60 * 1000);
   }
 
   async stopSession(sessionId: string, reason: string = "user_stop") {
