@@ -40,7 +40,6 @@ import {
   IconButton,
   Tooltip,
   Stack,
-  Divider,
   useTheme,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -98,16 +97,22 @@ function commandLabel(cmd: string) {
 }
 
 function commandChipSx(cmd: string) {
-  if (cmd === "[claude-sdk]") return { bgcolor: "#ede9fe", color: "#6d28d9", border: "none" };
-  if (cmd === "[litellm-chat]") return { bgcolor: "#ccfbf1", color: "#0f766e", border: "none" };
+  if (cmd === "[claude-sdk]")
+    return { bgcolor: "#ede9fe", color: "#6d28d9", border: "none" };
+  if (cmd === "[litellm-chat]")
+    return { bgcolor: "#ccfbf1", color: "#0f766e", border: "none" };
   return { bgcolor: "#e2e8f0", color: "#334155", border: "none" };
 }
 
 function statusChipSx(status: string) {
-  if (status === "running")  return { bgcolor: "#dcfce7", color: "#15803d", border: "none" };
-  if (status === "exited")   return { bgcolor: "#fef3c7", color: "#b45309", border: "none" };
-  if (status === "stopped")  return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
-  if (status === "error")    return { bgcolor: "#fee2e2", color: "#dc2626", border: "none" };
+  if (status === "running")
+    return { bgcolor: "#dcfce7", color: "#15803d", border: "none" };
+  if (status === "exited")
+    return { bgcolor: "#fef3c7", color: "#b45309", border: "none" };
+  if (status === "stopped")
+    return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
+  if (status === "error")
+    return { bgcolor: "#fee2e2", color: "#dc2626", border: "none" };
   return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
 }
 
@@ -186,7 +191,6 @@ function StatCard({
   sub?: string;
   valueColor?: string;
 }) {
-  const theme = useTheme();
   return (
     <Box>
       <Typography
@@ -202,7 +206,11 @@ function StatCard({
       </Typography>
       <Typography
         variant="h5"
-        sx={{ fontWeight: 700, lineHeight: 1.2, color: valueColor ?? "text.primary" }}
+        sx={{
+          fontWeight: 700,
+          lineHeight: 1.2,
+          color: valueColor ?? "text.primary",
+        }}
       >
         {value}
       </Typography>
@@ -259,28 +267,50 @@ function SessionsTable({ sessions }: { sessions: DashboardSession[] }) {
               <Chip
                 label={commandLabel(s.command)}
                 size="small"
-                sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(s.command) }}
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  ...commandChipSx(s.command),
+                }}
               />
             </TableCell>
             <TableCell>
               <Chip
                 label={s.status}
                 size="small"
-                sx={{ fontSize: 11, fontWeight: 700, ...statusChipSx(s.status) }}
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  ...statusChipSx(s.status),
+                }}
               />
               {s.stop_reason && s.stop_reason !== "process_exit" && (
-                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                <Typography
+                  component="span"
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ ml: 0.5 }}
+                >
                   ({s.stop_reason})
                 </Typography>
               )}
             </TableCell>
-            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+            <TableCell
+              align="right"
+              sx={{ fontVariantNumeric: "tabular-nums" }}
+            >
               {fmtTokens(s.estimated_input_tokens)}
             </TableCell>
-            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+            <TableCell
+              align="right"
+              sx={{ fontVariantNumeric: "tabular-nums" }}
+            >
               {fmtTokens(s.estimated_output_tokens)}
             </TableCell>
-            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+            <TableCell
+              align="right"
+              sx={{ fontVariantNumeric: "tabular-nums" }}
+            >
               ${fmt(s.estimated_cost_usd, 4)}
             </TableCell>
             <TableCell align="right">
@@ -298,9 +328,16 @@ function SessionsTable({ sessions }: { sessions: DashboardSession[] }) {
 
 // ── By Repo Tab ───────────────────────────────────────────────────────────────
 
-function RepoRow({ repo, totalCost }: { repo: DashboardRepo; totalCost: number }) {
+function RepoRow({
+  repo,
+  totalCost,
+}: {
+  repo: DashboardRepo;
+  totalCost: number;
+}) {
   const [expanded, setExpanded] = useState(false);
-  const pct = totalCost > 0 ? Math.round((repo.stats.total_cost / totalCost) * 100) : 0;
+  const pct =
+    totalCost > 0 ? Math.round((repo.stats.total_cost / totalCost) * 100) : 0;
   const theme = useTheme();
 
   return (
@@ -308,7 +345,10 @@ function RepoRow({ repo, totalCost }: { repo: DashboardRepo; totalCost: number }
       <TableRow
         hover
         onClick={() => setExpanded((v) => !v)}
-        sx={{ cursor: "pointer", "& > td": { borderBottom: expanded ? "none" : undefined } }}
+        sx={{
+          cursor: "pointer",
+          "& > td": { borderBottom: expanded ? "none" : undefined },
+        }}
       >
         <TableCell>
           <Box display="flex" alignItems="center" gap={0.5}>
@@ -322,14 +362,22 @@ function RepoRow({ repo, totalCost }: { repo: DashboardRepo; totalCost: number }
             <Typography fontWeight={600} fontSize={13}>
               {shortPath(repo.repo_path)}
             </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ ml: 0.5 }}
+            >
               {repo.repo_path}
             </Typography>
           </Box>
         </TableCell>
         <TableCell align="right">{repo.stats.session_count}</TableCell>
-        <TableCell align="right">{fmtTokens(repo.stats.total_input_tokens)}</TableCell>
-        <TableCell align="right">{fmtTokens(repo.stats.total_output_tokens)}</TableCell>
+        <TableCell align="right">
+          {fmtTokens(repo.stats.total_input_tokens)}
+        </TableCell>
+        <TableCell align="right">
+          {fmtTokens(repo.stats.total_output_tokens)}
+        </TableCell>
         <TableCell align="right">
           <Typography fontWeight={700} fontSize={13}>
             ${fmt(repo.stats.total_cost)}
@@ -486,28 +534,46 @@ function ByCommandTab({ commands }: { commands: DashboardCommandStat[] }) {
         </TableHead>
         <TableBody>
           {sorted.map((c) => {
-            const pct = totalCost > 0 ? Math.round((c.total_cost / totalCost) * 100) : 0;
+            const pct =
+              totalCost > 0 ? Math.round((c.total_cost / totalCost) * 100) : 0;
             return (
               <TableRow key={c.command} hover>
                 <TableCell>
                   <Chip
                     label={commandLabel(c.command)}
                     size="small"
-                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(c.command) }}
+                    sx={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      ...commandChipSx(c.command),
+                    }}
                   />
                 </TableCell>
                 <TableCell align="right">{c.session_count}</TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(c.avg_cost, 4)}
                 </TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(c.min_cost, 4)}
                 </TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(c.max_cost, 4)}
                 </TableCell>
-                <TableCell align="right">{fmtTokens(c.total_input_tokens)}</TableCell>
-                <TableCell align="right">{fmtTokens(c.total_output_tokens)}</TableCell>
+                <TableCell align="right">
+                  {fmtTokens(c.total_input_tokens)}
+                </TableCell>
+                <TableCell align="right">
+                  {fmtTokens(c.total_output_tokens)}
+                </TableCell>
                 <TableCell align="right">
                   <Typography fontWeight={700} fontSize={13}>
                     ${fmt(c.total_cost)}
@@ -590,9 +656,12 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
         </TableHead>
         <TableBody>
           {sorted.map((m) => {
-            const pct = totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
+            const pct =
+              totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
             const outputPerDollar =
-              m.total_cost > 0 ? Math.round(m.total_output_tokens / m.total_cost) : null;
+              m.total_cost > 0
+                ? Math.round(m.total_output_tokens / m.total_cost)
+                : null;
             return (
               <TableRow key={`${m.model}-${m.command}`} hover>
                 <TableCell>
@@ -600,7 +669,11 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
                     {m.model}
                   </Typography>
                   {outputPerDollar !== null && (
-                    <Typography variant="caption" color="text.secondary" display="block">
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      display="block"
+                    >
                       {fmtTokens(outputPerDollar)} output tokens / $1
                     </Typography>
                   )}
@@ -609,21 +682,38 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
                   <Chip
                     label={commandLabel(m.command)}
                     size="small"
-                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(m.command) }}
+                    sx={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      ...commandChipSx(m.command),
+                    }}
                   />
                 </TableCell>
                 <TableCell align="right">{m.session_count}</TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(m.avg_cost, 4)}
                 </TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(m.min_cost, 4)}
                 </TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontVariantNumeric: "tabular-nums" }}
+                >
                   ${fmt(m.max_cost, 4)}
                 </TableCell>
-                <TableCell align="right">{fmtTokens(m.total_input_tokens)}</TableCell>
-                <TableCell align="right">{fmtTokens(m.total_output_tokens)}</TableCell>
+                <TableCell align="right">
+                  {fmtTokens(m.total_input_tokens)}
+                </TableCell>
+                <TableCell align="right">
+                  {fmtTokens(m.total_output_tokens)}
+                </TableCell>
                 <TableCell align="right">
                   <Typography fontWeight={700} fontSize={13}>
                     ${fmt(m.total_cost)}
@@ -693,14 +783,11 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
               ${fmt(week.spend)}
             </Typography>
             <Typography component="span" color="text.secondary">
-              {" "}/ ${fmt(week.budget)}
+              {" "}
+              / ${fmt(week.budget)}
             </Typography>
           </Typography>
-          <Typography
-            fontSize={13}
-            fontWeight={600}
-            color={`${pctColor}.main`}
-          >
+          <Typography fontSize={13} fontWeight={600} color={`${pctColor}.main`}>
             {week.percent}%
           </Typography>
         </Box>
@@ -716,7 +803,11 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
       <Stack direction="row" gap={4}>
         {(
           [
-            { label: "Avg / day", value: `$${fmt(week.daily_average)}`, alert: false },
+            {
+              label: "Avg / day",
+              value: `$${fmt(week.daily_average)}`,
+              alert: false,
+            },
             {
               label: "Projected",
               value: `$${fmt(week.projected_week_end)}`,
@@ -730,7 +821,11 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
           ] as { label: string; value: string; alert: boolean }[]
         ).map(({ label, value, alert }) => (
           <Box key={label} textAlign="right">
-            <Typography variant="caption" color="text.secondary" display="block">
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              display="block"
+            >
               {label}
             </Typography>
             <Typography
@@ -781,8 +876,8 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
     week.daily_average > 0
       ? week.daily_average
       : week.days_elapsed > 0
-      ? week.spend / week.days_elapsed
-      : 0;
+        ? week.spend / week.days_elapsed
+        : 0;
 
   const chartData = daily_spend.map((d: DashboardDaySpend) => ({
     ...d,
@@ -793,13 +888,22 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
 
   function barFill(d: DashboardDaySpend) {
     if (d.isFuture) return theme.palette.action.disabledBackground;
-    if (d.isToday) return week.will_exceed ? theme.palette.error.main : theme.palette.primary.main;
-    return week.will_exceed ? theme.palette.error.light : theme.palette.primary.light;
+    if (d.isToday)
+      return week.will_exceed
+        ? theme.palette.error.main
+        : theme.palette.primary.main;
+    return week.will_exceed
+      ? theme.palette.error.light
+      : theme.palette.primary.light;
   }
 
   return (
     <ResponsiveContainer width="100%" height={110}>
-      <BarChart data={chartData} barCategoryGap="20%" margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+      <BarChart
+        data={chartData}
+        barCategoryGap="20%"
+        margin={{ top: 20, right: 8, bottom: 0, left: 0 }}
+      >
         <XAxis
           dataKey="label"
           tick={{ fontSize: 11, fill: theme.palette.text.secondary }}
@@ -808,7 +912,10 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
         />
         <YAxis hide />
         <RechartsTooltip
-          formatter={(value: number) => [`$${(value as number).toFixed(4)}`, "Spend"]}
+          formatter={(value: number) => [
+            `$${(value as number).toFixed(4)}`,
+            "Spend",
+          ]}
           contentStyle={{
             background: theme.palette.background.paper,
             border: `1px solid ${theme.palette.divider}`,
@@ -874,7 +981,8 @@ function DashboardHeader({
         </Typography>
         {stats && (
           <Typography variant="body2" color="text.secondary">
-            {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
+            {new Date(from).toLocaleDateString()} –{" "}
+            {new Date(to).toLocaleDateString()}
           </Typography>
         )}
       </Box>
@@ -932,10 +1040,22 @@ function DashboardHeader({
       {/* Stats row */}
       {stats && (
         <Stack direction="row" gap={4} flexWrap="wrap">
-          <StatCard label="Total Spend" value={`$${fmt(stats.totals.total_cost)}`} />
-          <StatCard label="Sessions" value={String(stats.totals.total_sessions)} />
-          <StatCard label="Input Tokens" value={fmtTokens(stats.totals.total_input_tokens)} />
-          <StatCard label="Output Tokens" value={fmtTokens(stats.totals.total_output_tokens)} />
+          <StatCard
+            label="Total Spend"
+            value={`$${fmt(stats.totals.total_cost)}`}
+          />
+          <StatCard
+            label="Sessions"
+            value={String(stats.totals.total_sessions)}
+          />
+          <StatCard
+            label="Input Tokens"
+            value={fmtTokens(stats.totals.total_input_tokens)}
+          />
+          <StatCard
+            label="Output Tokens"
+            value={fmtTokens(stats.totals.total_output_tokens)}
+          />
           {stats.totals.period_budget > 0 && (
             <StatCard
               label="Budget Used"
@@ -944,8 +1064,8 @@ function DashboardHeader({
                 stats.totals.budget_percent >= 90
                   ? "error.main"
                   : stats.totals.budget_percent >= 70
-                  ? "warning.main"
-                  : "success.main"
+                    ? "warning.main"
+                    : "success.main"
               }
               sub={`$${fmt(stats.totals.total_cost)} / $${fmt(stats.totals.period_budget)}`}
             />
@@ -1053,7 +1173,9 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
           Back to sessions
         </Button>
         <Box flex={1} />
-        <Tooltip title={`Switch to ${theme.palette.mode === "dark" ? "light" : "dark"} mode`}>
+        <Tooltip
+          title={`Switch to ${theme.palette.mode === "dark" ? "light" : "dark"} mode`}
+        >
           <IconButton onClick={colorMode.toggle} size="small">
             {theme.palette.mode === "dark" ? (
               <LightModeIcon fontSize="small" />
@@ -1170,11 +1292,15 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
               {error}
             </Alert>
           )}
-          {!loading && !error && tab === "by_repo" && <ByRepoTab repos={repos} />}
+          {!loading && !error && tab === "by_repo" && (
+            <ByRepoTab repos={repos} />
+          )}
           {!loading && !error && tab === "by_command" && (
             <ByCommandTab commands={commands} />
           )}
-          {!loading && !error && tab === "by_model" && <ByModelTab models={models} />}
+          {!loading && !error && tab === "by_model" && (
+            <ByModelTab models={models} />
+          )}
         </Paper>
       </Box>
     </Box>
@@ -1187,7 +1313,9 @@ export default function Dashboard({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<"light" | "dark">("light");
 
   const colorMode = useMemo(
-    () => ({ toggle: () => setMode((prev) => (prev === "light" ? "dark" : "light")) }),
+    () => ({
+      toggle: () => setMode((prev) => (prev === "light" ? "dark" : "light")),
+    }),
     [],
   );
 
@@ -1197,10 +1325,18 @@ export default function Dashboard({ onBack }: { onBack: () => void }) {
         palette: {
           mode,
           ...(mode === "dark"
-            ? { background: { default: "#0f1117", paper: "#1a1d27" }, primary: { main: "#6366f1" } }
-            : { background: { default: "#f9fafb", paper: "#ffffff" }, primary: { main: "#4f46e5" } }),
+            ? {
+                background: { default: "#0f1117", paper: "#1a1d27" },
+                primary: { main: "#6366f1" },
+              }
+            : {
+                background: { default: "#f9fafb", paper: "#ffffff" },
+                primary: { main: "#4f46e5" },
+              }),
         },
-        typography: { fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" },
+        typography: {
+          fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+        },
         components: {
           MuiTableCell: {
             styleOverrides: {
