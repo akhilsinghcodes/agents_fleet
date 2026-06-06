@@ -340,7 +340,6 @@ function captureGitArtifactBestEffort(
 }
 
 const PTY_FLUSH_MS = 50;
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_POLL_MS = 15 * 1000;
 const CHAT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -823,7 +822,11 @@ export class ProcessManager {
 
       // Capture git state when the user explicitly stops (best-effort).
       try {
-        captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
+        captureGitArtifactBestEffort(
+          sessionId,
+          running.repoPath,
+          "git_on_stop",
+        );
       } catch {
         // ignore
       }
