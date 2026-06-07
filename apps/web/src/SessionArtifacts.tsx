@@ -131,15 +131,25 @@ export default function SessionArtifacts({ sessionId }: Props) {
   return (
     <div style={{ display: "grid", gridTemplateRows: "auto 1fr", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 600 }}>Artifacts</div>
-        <div style={{ fontSize: 12, color: "#6b7280" }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>Artifacts</div>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>
           {loading
             ? "Loading…"
             : error
               ? "Error"
               : `${artifacts.length} item(s)`}
-          {sessionStatus ? ` • ${sessionStatus}` : ""}
-          {lastUpdatedAt ? ` • updated ${formatTs(lastUpdatedAt)}` : ""}
+          {sessionStatus ? (
+            <span style={{
+              marginLeft: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "1px 6px",
+              borderRadius: 4,
+              background: sessionStatus === "running" ? "#dcfce7" : "#f1f5f9",
+              color: sessionStatus === "running" ? "#15803d" : "#475569",
+            }}>{sessionStatus}</span>
+          ) : ""}
+          {lastUpdatedAt ? ` · updated ${formatTs(lastUpdatedAt)}` : ""}
         </div>
         <div style={{ flex: 1 }} />
         <button
@@ -147,13 +157,14 @@ export default function SessionArtifacts({ sessionId }: Props) {
             setRefreshNonce((n) => n + 1);
           }}
           style={{
-            padding: "6px 10px",
-            borderRadius: 10,
+            padding: "4px 12px",
+            borderRadius: 6,
             border: "1px solid #e5e7eb",
             background: "white",
-            color: "#111827",
+            color: "#4f46e5",
             cursor: "pointer",
             fontSize: 12,
+            fontWeight: 600,
           }}
         >
           Refresh
@@ -193,17 +204,19 @@ export default function SessionArtifacts({ sessionId }: Props) {
                 style={{
                   width: "100%",
                   textAlign: "left",
-                  padding: 10,
+                  padding: "8px 10px 8px 12px",
                   border: "none",
                   borderBottom: "1px solid #f3f4f6",
-                  background: isSel ? "#f3f4f6" : "white",
+                  borderLeft: isSel ? "3px solid #4f46e5" : "3px solid transparent",
+                  background: isSel ? "#f0f0ff" : "white",
                   cursor: "pointer",
+                  transition: "background 0.1s",
                 }}
               >
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                <div style={{ fontSize: 11, color: "#9ca3af" }}>
                   {formatTs(a.timestamp)}
                 </div>
-                <div style={{ fontWeight: 600, fontSize: 12, marginTop: 4 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginTop: 3, color: isSel ? "#4f46e5" : "#111827" }}>
                   {a.kind}
                 </div>
               </button>
@@ -245,20 +258,26 @@ export default function SessionArtifacts({ sessionId }: Props) {
                             None
                           </div>
                         ) : (
-                          <ul style={{ margin: 0, paddingLeft: 18 }}>
-                            {parsed.changedFiles.map((f) => (
-                              <li
-                                key={f}
-                                style={{
-                                  fontFamily:
-                                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                                  fontSize: 12,
-                                }}
-                              >
-                                {f}
-                              </li>
-                            ))}
-                          </ul>
+                          <div style={{ display: "grid", gap: 3 }}>
+                            {parsed.changedFiles.map((f) => {
+                              const m = f.match(/^([MADRCU?!]+)\s+(.+)$/);
+                              const status = m ? m[1] : null;
+                              const path = m ? m[2] : f;
+                              const statusColor =
+                                status === "A" ? "#15803d" :
+                                status === "D" ? "#dc2626" :
+                                status === "M" ? "#d97706" :
+                                status === "R" ? "#0891b2" : "#6b7280";
+                              return (
+                                <div key={f} style={{ display: "flex", alignItems: "baseline", gap: 6, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize: 12 }}>
+                                  {status && (
+                                    <span style={{ fontWeight: 700, color: statusColor, minWidth: 14, flexShrink: 0 }}>{status}</span>
+                                  )}
+                                  <span style={{ color: "#374151" }}>{path}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
 
