@@ -296,11 +296,11 @@ Screenshots:
 
 - Claude SDK tool call + output
 
-![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg)
+![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg.png)
 
 - Claude SDK tool permission gate (Approve/Reject)
 
-![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg)
+![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg.png)
 
 ### LiteLLM Chat (proxy support)
 **Use your enterprise URL and API key to access multiple models through a LiteLLM proxy.**
