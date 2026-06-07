@@ -9,94 +9,295 @@ import TerminalReplay from "./TerminalReplay";
 import SessionArtifacts from "./SessionArtifacts";
 import Dashboard from "./Dashboard";
 
+import {
+  createTheme,
+  ThemeProvider,
+  CssBaseline,
+  Box,
+  Typography,
+  Button,
+  ButtonGroup,
+  Chip,
+  Alert,
+  Paper,
+  TextField,
+  Stack,
+  IconButton,
+  Tooltip,
+  Divider,
+} from "@mui/material";
+import BarChartIcon from "@mui/icons-material/BarChart";
+import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import AddIcon from "@mui/icons-material/Add";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 type LeftTab = "shell" | "claude_sdk" | "litellm";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
-const STATUS_COLOR: Record<string, string> = {
-  running: "#16a34a",
-  stopped: "#9ca3af",
-  exited: "#9ca3af",
-  error: "#dc2626",
-};
+// ── Status badge ──────────────────────────────────────────────────────────────
 
-function StatusDot({ status }: { status: string }) {
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<
+    string,
+    { bgcolor: string; color: string; border?: string }
+  > = {
+    running: { bgcolor: "#dcfce7", color: "#15803d" },
+    exited: { bgcolor: "#fef3c7", color: "#b45309" },
+    stopped: { bgcolor: "#f1f5f9", color: "#475569" },
+    error: { bgcolor: "#fee2e2", color: "#dc2626" },
+  };
+  const s = styles[status] ?? styles.stopped;
   return (
-    <span
-      style={{
-        display: "inline-block",
-        width: 7,
-        height: 7,
-        borderRadius: "50%",
-        background: STATUS_COLOR[status] ?? "#9ca3af",
-        flexShrink: 0,
+    <Chip
+      label={status}
+      size="small"
+      sx={{
+        height: 18,
+        fontSize: 10,
+        fontWeight: 700,
+        px: 0.25,
+        bgcolor: s.bgcolor,
+        color: s.color,
+        border: "none",
       }}
     />
   );
 }
 
-function TabBtn({
-  active,
-  onClick,
-  children,
-  variant = "pill",
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  variant?: "pill" | "ghost";
-}) {
-  if (variant === "ghost") {
+// ── Command type badge ────────────────────────────────────────────────────────
+
+function CommandBadge({ command }: { command: string }) {
+  if (command === "[claude-sdk]")
     return (
-      <button
-        onClick={onClick}
-        style={{
-          padding: "5px 12px",
-          borderRadius: 8,
-          border: "1px solid #d1d5db",
-          background: "white",
-          color: "#374151",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 500,
-          whiteSpace: "nowrap",
+      <Chip
+        label="Claude SDK"
+        size="small"
+        sx={{
+          height: 17,
+          fontSize: 10,
+          fontWeight: 700,
+          bgcolor: "#ede9fe",
+          color: "#6d28d9",
+          border: "none",
         }}
-      >
-        {children}
-      </button>
+      />
     );
-  }
+  if (command === "[litellm-chat]")
+    return (
+      <Chip
+        label="LiteLLM"
+        size="small"
+        sx={{
+          height: 17,
+          fontSize: 10,
+          fontWeight: 700,
+          bgcolor: "#ccfbf1",
+          color: "#0f766e",
+          border: "none",
+        }}
+      />
+    );
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "5px 12px",
-        borderRadius: 8,
-        border: active ? "none" : "none",
-        background: active ? "#111827" : "transparent",
-        color: active ? "white" : "#6b7280",
-        cursor: "pointer",
-        fontSize: 13,
-        fontWeight: active ? 600 : 400,
-        whiteSpace: "nowrap",
+    <Chip
+      label="Shell"
+      size="small"
+      sx={{
+        height: 17,
+        fontSize: 10,
+        fontWeight: 700,
+        bgcolor: "#e2e8f0",
+        color: "#334155",
+        border: "none",
       }}
-    >
-      {children}
-    </button>
+    />
   );
 }
 
+// ── Sessions sidebar ──────────────────────────────────────────────────────────
+
+function SessionsSidebar({
+  sessions,
+  selectedId,
+  showAll,
+  onToggleShowAll,
+  onSelect,
+  onDelete,
+}: {
+  sessions: Session[];
+  selectedId: string | null;
+  showAll: boolean;
+  onToggleShowAll: () => void;
+  onSelect: (s: Session) => void;
+  onDelete: (id: string) => void;
+}) {
+  const visible = sessions.filter((s) => showAll || s.status === "running");
+  const runningCount = sessions.filter((s) => s.status === "running").length;
+
+  return (
+    <Paper
+      elevation={0}
+      square
+      sx={{
+        display: "grid",
+        gridTemplateRows: "52px 1fr",
+        minHeight: 0,
+        overflow: "hidden",
+        borderLeft: 1,
+        borderColor: "divider",
+      }}
+    >
+      {/* Header */}
+      <Box
+        display="flex"
+        alignItems="center"
+        px={1.5}
+        gap={1}
+        sx={{ borderBottom: 1, borderColor: "divider" }}
+      >
+        <Typography fontWeight={700} fontSize={14}>
+          Sessions
+        </Typography>
+        {sessions.length > 0 && (
+          <Chip
+            label={`${runningCount} running`}
+            size="small"
+            variant="outlined"
+            color={runningCount > 0 ? "success" : "default"}
+            sx={{ height: 20, fontSize: 11 }}
+          />
+        )}
+        <Box flex={1} />
+        <Button
+          size="small"
+          variant={showAll ? "contained" : "outlined"}
+          disableElevation
+          onClick={onToggleShowAll}
+          sx={{ fontSize: 11, textTransform: "none", py: 0.25, minWidth: 0 }}
+        >
+          {showAll ? "Running only" : "Show all"}
+        </Button>
+      </Box>
+
+      {/* List */}
+      <Box sx={{ overflow: "auto" }}>
+        {visible.length === 0 ? (
+          <Typography p={2} fontSize={13} color="text.secondary">
+            {showAll ? "No sessions yet." : "No running sessions."}
+          </Typography>
+        ) : (
+          visible.map((s) => {
+            const isSelected = s.id === selectedId;
+            const canDelete = s.status !== "running";
+            return (
+              <Box
+                key={s.id}
+                sx={{
+                  position: "relative",
+                  borderBottom: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Box
+                  component="button"
+                  onClick={() => onSelect(s)}
+                  sx={{
+                    width: "100%",
+                    textAlign: "left",
+                    px: 1.75,
+                    py: 1.25,
+                    pr: canDelete ? 5 : 1.75,
+                    border: "none",
+                    borderLeft: 3,
+                    borderLeftStyle: "solid",
+                    borderLeftColor: isSelected ? "#0891b2" : "transparent",
+                    bgcolor: isSelected ? "#f0f9ff" : "background.paper",
+                    color: "text.primary",
+                    cursor: "pointer",
+                    display: "block",
+                    "&:hover": {
+                      bgcolor: isSelected ? "#e0f4fc" : "action.hover",
+                    },
+                    transition: "background 0.1s",
+                  }}
+                >
+                  <Box
+                    display="flex"
+                    alignItems="center"
+                    gap={0.75}
+                    mb={0.5}
+                    flexWrap="wrap"
+                  >
+                    <StatusBadge status={s.status} />
+                    <CommandBadge command={s.command} />
+                    <Typography
+                      fontSize={10}
+                      color="text.disabled"
+                      noWrap
+                      sx={{ ml: "auto" }}
+                    >
+                      {new Date(s.created_at).toLocaleTimeString()}
+                    </Typography>
+                  </Box>
+                  <Typography fontWeight={600} fontSize={13} mb={0.25} noWrap>
+                    {s.command}
+                  </Typography>
+                  <Typography fontSize={11} color="text.secondary" noWrap>
+                    {s.repo_path}
+                  </Typography>
+                </Box>
+
+                {canDelete && (
+                  <Tooltip title="Delete session">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(s.id);
+                      }}
+                      sx={{
+                        position: "absolute",
+                        top: 8,
+                        right: 6,
+                        color: "text.disabled",
+                        "&:hover": {
+                          color: "error.main",
+                          bgcolor: "action.hover",
+                        },
+                      }}
+                    >
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+            );
+          })
+        )}
+      </Box>
+    </Paper>
+  );
+}
+
+// ── Main app ──────────────────────────────────────────────────────────────────
+
 function MainApp({ onDashboard }: { onDashboard: () => void }) {
+  // ── Form state ──────────────────────────────────────────────────────────────
   const [repoPath, setRepoPath] = useState("");
   const [command, setCommand] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [budgetTokens, setBudgetTokens] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // ── Tab state ───────────────────────────────────────────────────────────────
   const [leftTab, setLeftTab] = useState<LeftTab>("shell");
   const [centerTab, setCenterTab] = useState<CenterTab>("terminal");
   const [claudeDraftNonce, setClaudeDraftNonce] = useState(0);
   const [liteLlmDraftNonce, setLiteLlmDraftNonce] = useState(0);
   const [showAllSessions, setShowAllSessions] = useState(false);
 
+  // ── Session state ────────────────────────────────────────────────────────────
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -106,10 +307,15 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
     [sessions, selectedId],
   );
 
+  // ── Session polling ──────────────────────────────────────────────────────────
   async function refreshSessions(preserveSelected = true) {
     const next = await listSessions();
     setSessions(next);
-    if (preserveSelected && selectedId && !next.some((s) => s.id === selectedId)) {
+    if (
+      preserveSelected &&
+      selectedId &&
+      !next.some((s) => s.id === selectedId)
+    ) {
       setSelectedId(null);
     }
   }
@@ -122,6 +328,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
     return () => window.clearInterval(id);
   }, []);
 
+  // ── WebSocket ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedId) {
       if (ws) ws.close();
@@ -135,7 +342,10 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
       socket.send(JSON.stringify({ type: "subscribe", sessionId: selectedId }));
     socket.onmessage = (evt) => {
       const msg = JSON.parse(evt.data as string) as WsServerMessage;
-      if (msg.type === "error") { setError(msg.message); return; }
+      if (msg.type === "error") {
+        setError(msg.message);
+        return;
+      }
       if (msg.type === "pty" && msg.sessionId === selectedId) {
         window.dispatchEvent(
           new CustomEvent("agents_fleet:pty", {
@@ -145,13 +355,19 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
         return;
       }
       if (msg.type === "session") {
-        setSessions((prev) => prev.map((s) => (s.id === msg.session.id ? msg.session : s)));
+        setSessions((prev) =>
+          prev.map((s) => (s.id === msg.session.id ? msg.session : s)),
+        );
       }
     };
     socket.onerror = () => setError("WebSocket error");
-    return () => { socket.close(); setWs(null); };
+    return () => {
+      socket.close();
+      setWs(null);
+    };
   }, [selectedId]);
 
+  // ── Handlers ─────────────────────────────────────────────────────────────────
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -162,114 +378,210 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
         budgetUsd: budgetUsd.trim() ? Number(budgetUsd) : undefined,
         budgetTokens: budgetTokens.trim() ? Number(budgetTokens) : undefined,
       });
-      setRepoPath(""); setCommand(""); setBudgetUsd(""); setBudgetTokens("");
+      setRepoPath("");
+      setCommand("");
+      setBudgetUsd("");
+      setBudgetTokens("");
       await refreshSessions(false);
       setSelectedId(session.id);
       setCenterTab("terminal");
-    } catch (err) { setError(String(err)); }
+    } catch (err) {
+      setError(String(err));
+    }
   }
 
   async function onStop() {
     if (!selected) return;
     try {
       const updated = await stopSession(selected.id);
-      setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-    } catch (err) { setError(String(err)); }
+      setSessions((prev) =>
+        prev.map((s) => (s.id === updated.id ? updated : s)),
+      );
+    } catch (err) {
+      setError(String(err));
+    }
   }
 
-  const inputStyle: React.CSSProperties = {
-    padding: "7px 10px",
-    borderRadius: 7,
-    border: "1px solid #d1d5db",
-    fontSize: 13,
-    width: "100%",
-    boxSizing: "border-box",
-    outline: "none",
-  };
+  function onSelectSession(s: Session) {
+    if (s.command === "[claude-sdk]") setLeftTab("claude_sdk");
+    else if (s.command === "[litellm-chat]") setLeftTab("litellm");
+    else setLeftTab("shell");
+    setSelectedId(s.id);
+  }
 
-  const labelStyle: React.CSSProperties = {
-    display: "grid",
-    gap: 4,
-  };
+  function onDeleteSession(id: string) {
+    deleteSession(id)
+      .then(() => {
+        if (selectedId === id) setSelectedId(null);
+        return refreshSessions(false);
+      })
+      .catch((err) => setError(String(err)));
+  }
 
-  const labelTextStyle: React.CSSProperties = {
-    fontSize: 12,
-    color: "#6b7280",
-    fontWeight: 500,
+  // ── Left-tab buttons ─────────────────────────────────────────────────────────
+  const leftTabs: { key: LeftTab; label: string }[] = [
+    { key: "shell", label: "Shell" },
+    { key: "claude_sdk", label: "Claude (SDK)" },
+    { key: "litellm", label: "LiteLLM" },
+  ];
+
+  // ── Center-tab config ────────────────────────────────────────────────────────
+  const centerTabLabels: Record<CenterTab, string> = {
+    terminal: "Terminal (live)",
+    logs: "Terminal (persisted)",
+    artifacts: "Artifacts",
   };
 
   return (
-    <div
-      style={{
-        fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+    <Box
+      sx={{
         height: "100vh",
         display: "grid",
         gridTemplateColumns: "1fr 300px",
         gridTemplateRows: "1fr",
-        background: "#f3f4f6",
+        bgcolor: "background.default",
         overflow: "hidden",
       }}
     >
       {/* ── Main content ── */}
-      <div
-        style={{
+      <Box
+        sx={{
           display: "grid",
-          gridTemplateRows: "52px 1fr",
+          gridTemplateRows: "52px 1fr auto",
           minHeight: 0,
-          background: "white",
-          borderRight: "1px solid #e5e7eb",
+          bgcolor: "background.paper",
+          borderRight: 1,
+          borderColor: "divider",
         }}
       >
         {/* Header bar */}
-        <header
-          style={{
+        <Paper
+          elevation={0}
+          square
+          sx={{
             display: "flex",
             alignItems: "center",
-            gap: 4,
-            padding: "0 16px",
-            borderBottom: "1px solid #e5e7eb",
-            background: "white",
+            gap: 0.5,
+            px: 2,
+            borderBottom: 1,
+            borderColor: "divider",
+            background: "linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%)",
           }}
         >
-          <span style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginRight: 8, whiteSpace: "nowrap" }}>
-            New Session
-          </span>
-          <span style={{ flex: 1 }} />
-          <button
-            onClick={onDashboard}
-            style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #e5e7eb", background: "white", color: "#374151", cursor: "pointer", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", marginRight: 4 }}
+          <Typography
+            fontWeight={800}
+            fontSize={15}
+            letterSpacing={1.5}
+            sx={{
+              mr: 1,
+              whiteSpace: "nowrap",
+              color: "#ffffff",
+              fontFamily: "ui-monospace, monospace",
+            }}
           >
-            📊 Spend Dashboard
-          </button>
-          <TabBtn active={leftTab === "shell"} onClick={() => setLeftTab("shell")}>Shell</TabBtn>
-          <TabBtn active={leftTab === "claude_sdk"} onClick={() => setLeftTab("claude_sdk")}>
-            Claude (SDK)
-          </TabBtn>
-          <TabBtn active={leftTab === "litellm"} onClick={() => setLeftTab("litellm")}>LiteLLM</TabBtn>
-          {leftTab === "claude_sdk" && (
-            <TabBtn
-              active={false}
-              variant="ghost"
-              onClick={() => { setSelectedId(null); setClaudeDraftNonce((n) => n + 1); }}
+            AGENT FLEET
+          </Typography>
+          <Chip
+            label="beta"
+            size="small"
+            sx={{
+              height: 16,
+              fontSize: 9,
+              fontWeight: 700,
+              bgcolor: "rgba(255,255,255,0.18)",
+              color: "#fff",
+              letterSpacing: 0.5,
+              mr: 1,
+            }}
+          />
+
+          <Box flex={1} />
+
+          {/* Spend dashboard button */}
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<BarChartIcon fontSize="small" />}
+            onClick={onDashboard}
+            sx={{
+              textTransform: "none",
+              fontSize: 13,
+              mr: 1,
+              whiteSpace: "nowrap",
+              color: "#fff",
+              borderColor: "rgba(255,255,255,0.45)",
+              "&:hover": {
+                borderColor: "#fff",
+                bgcolor: "rgba(255,255,255,0.12)",
+              },
+            }}
+          >
+            Spend Dashboard
+          </Button>
+
+          {/* Left-tab switcher */}
+          <ButtonGroup size="small" variant="text" disableElevation>
+            {leftTabs.map(({ key, label }) => (
+              <Button
+                key={key}
+                onClick={() => setLeftTab(key)}
+                sx={{
+                  textTransform: "none",
+                  fontWeight: leftTab === key ? 700 : 400,
+                  bgcolor:
+                    leftTab === key ? "rgba(255,255,255,0.22)" : "transparent",
+                  color: "#fff",
+                  borderRadius: 1.5,
+                  px: 1.5,
+                  fontSize: 13,
+                  "&:hover": { bgcolor: "rgba(255,255,255,0.12)" },
+                }}
+              >
+                {label}
+              </Button>
+            ))}
+          </ButtonGroup>
+
+          {/* New chat ghost button */}
+          {(leftTab === "claude_sdk" || leftTab === "litellm") && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AddIcon fontSize="small" />}
+              onClick={() => {
+                setSelectedId(null);
+                if (leftTab === "claude_sdk") setClaudeDraftNonce((n) => n + 1);
+                else setLiteLlmDraftNonce((n) => n + 1);
+              }}
+              sx={{
+                textTransform: "none",
+                fontSize: 13,
+                ml: 0.5,
+                color: "#fff",
+                borderColor: "rgba(255,255,255,0.45)",
+                "&:hover": {
+                  borderColor: "#fff",
+                  bgcolor: "rgba(255,255,255,0.12)",
+                },
+              }}
             >
               New chat
-            </TabBtn>
+            </Button>
           )}
-          {leftTab === "litellm" && (
-            <TabBtn
-              active={false}
-              variant="ghost"
-              onClick={() => { setSelectedId(null); setLiteLlmDraftNonce((n) => n + 1); }}
-            >
-              New chat
-            </TabBtn>
-          )}
-        </header>
+        </Paper>
 
         {/* Content area */}
-        <div style={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
+        <Box sx={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
           {leftTab === "claude_sdk" ? (
-            <div style={{ padding: 20, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
+            <Box
+              sx={{
+                p: 2.5,
+                overflow: "auto",
+                minHeight: 0,
+                display: "grid",
+                gridTemplateRows: "1fr",
+              }}
+            >
               {selected && selected.command === "[claude-sdk]" ? (
                 <ClaudeSdkChat mode="existing" sessionId={selected.id} />
               ) : (
@@ -284,9 +596,17 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                   }}
                 />
               )}
-            </div>
+            </Box>
           ) : leftTab === "litellm" ? (
-            <div style={{ padding: 20, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
+            <Box
+              sx={{
+                p: 2.5,
+                overflow: "auto",
+                minHeight: 0,
+                display: "grid",
+                gridTemplateRows: "1fr",
+              }}
+            >
               {selected && selected.command === "[litellm-chat]" ? (
                 <LiteLLMChat mode="existing" sessionId={selected.id} />
               ) : (
@@ -301,168 +621,277 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                   }}
                 />
               )}
-            </div>
+            </Box>
           ) : (
             /* Shell tab */
-            <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateRows: "auto 1fr",
+                minHeight: 0,
+              }}
+            >
               {/* Shell creation form */}
-              <div
-                style={{
-                  padding: "12px 20px",
-                  borderBottom: "1px solid #f0f0f0",
-                  background: "#fafafa",
+              <Box
+                component="form"
+                onSubmit={onCreate}
+                sx={{
+                  px: 2.5,
+                  py: 1.5,
+                  borderBottom: 1,
+                  borderColor: "divider",
+                  bgcolor: "background.default",
                 }}
               >
-                <form onSubmit={onCreate}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto auto", gap: 8, alignItems: "end" }}>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Repo path</span>
-                      <input
-                        value={repoPath}
-                        onChange={(e) => setRepoPath(e.target.value)}
-                        placeholder="/path/to/repo"
-                        style={inputStyle}
-                      />
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Command</span>
-                      <input
-                        value={command}
-                        onChange={(e) => setCommand(e.target.value)}
-                        placeholder="git status"
-                        style={inputStyle}
-                      />
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Budget USD</span>
-                      <input
-                        value={budgetUsd}
-                        onChange={(e) => setBudgetUsd(e.target.value)}
-                        placeholder="optional"
-                        inputMode="decimal"
-                        style={{ ...inputStyle, width: 100 }}
-                      />
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Budget tokens</span>
-                      <input
-                        value={budgetTokens}
-                        onChange={(e) => setBudgetTokens(e.target.value)}
-                        placeholder="optional"
-                        inputMode="numeric"
-                        style={{ ...inputStyle, width: 100 }}
-                      />
-                    </label>
-                    <div style={{ paddingTop: 18 }}>
-                      <button
-                        type="submit"
-                        style={{
-                          padding: "7px 18px",
-                          borderRadius: 7,
-                          border: "none",
-                          background: "#111827",
-                          color: "white",
-                          cursor: "pointer",
-                          fontSize: 13,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Start
-                      </button>
-                    </div>
-                  </div>
-                  {error && (
-                    <p style={{ margin: "8px 0 0", color: "#dc2626", fontSize: 12 }}>{error}</p>
-                  )}
-                </form>
-              </div>
-
-              {/* Session header + terminal */}
-              <div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0 }}>
-                {selected && (
-                  <div
-                    style={{
-                      padding: "8px 20px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      borderBottom: "1px solid #f0f0f0",
-                      fontSize: 12,
-                      color: "#6b7280",
+                <Stack direction="row" gap={1} alignItems="flex-end">
+                  <TextField
+                    label="Repo path"
+                    placeholder="/path/to/repo"
+                    value={repoPath}
+                    onChange={(e) => setRepoPath(e.target.value)}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    inputProps={{ style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Command"
+                    placeholder="git status"
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    inputProps={{ style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Budget USD"
+                    placeholder="optional"
+                    value={budgetUsd}
+                    onChange={(e) => setBudgetUsd(e.target.value)}
+                    size="small"
+                    sx={{ width: 110 }}
+                    inputProps={{
+                      inputMode: "decimal",
+                      style: { fontSize: 13 },
+                    }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Budget tokens"
+                    placeholder="optional"
+                    value={budgetTokens}
+                    onChange={(e) => setBudgetTokens(e.target.value)}
+                    size="small"
+                    sx={{ width: 120 }}
+                    inputProps={{
+                      inputMode: "numeric",
+                      style: { fontSize: 13 },
+                    }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    disableElevation
+                    sx={{
+                      textTransform: "none",
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    <StatusDot status={selected.status} />
-                    <span style={{ color: "#374151", fontWeight: 500 }}>{selected.status}</span>
-                    <span style={{ color: "#9ca3af" }}>·</span>
-                    <span>{selected.repo_path}</span>
-                    <span style={{ color: "#9ca3af" }}>·</span>
-                    <span>id={selected.id.slice(0, 8)}</span>
-                    <span style={{ color: "#9ca3af" }}>·</span>
-                    <span>in={selected.estimated_input_tokens}</span>
-                    <span>out={selected.estimated_output_tokens}</span>
-                    <span>cost=${selected.estimated_cost_usd.toFixed(6)}</span>
-                    {selected.stop_reason && <span>· {selected.stop_reason}</span>}
-                    <div style={{ flex: 1 }} />
-                    <button
+                    Start
+                  </Button>
+                </Stack>
+                {error && (
+                  <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: 12 }}>
+                    {error}
+                  </Alert>
+                )}
+              </Box>
+
+              {/* Session header + terminal area */}
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateRows: "auto auto 1fr",
+                  minHeight: 0,
+                }}
+              >
+                {/* Selected session info bar */}
+                {selected && (
+                  <Box
+                    sx={{
+                      px: 2.5,
+                      py: 0.875,
+                      borderBottom: 1,
+                      borderColor: "divider",
+                      bgcolor: "background.default",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1.5,
+                      minWidth: 0,
+                    }}
+                  >
+                    <StatusBadge status={selected.status} />
+                    <Typography
+                      fontSize={13}
+                      fontWeight={500}
+                      fontFamily="ui-monospace, monospace"
+                      sx={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={selected.repo_path}
+                    >
+                      {selected.repo_path}
+                    </Typography>
+                    <Divider orientation="vertical" flexItem />
+                    <Typography
+                      fontSize={12}
+                      color="text.secondary"
+                      sx={{ flexShrink: 0 }}
+                    >
+                      in{" "}
+                      <Box
+                        component="span"
+                        fontWeight={700}
+                        sx={{ color: "text.primary" }}
+                      >
+                        {selected.estimated_input_tokens.toLocaleString()}
+                      </Box>
+                    </Typography>
+                    <Typography
+                      fontSize={12}
+                      color="text.secondary"
+                      sx={{ flexShrink: 0 }}
+                    >
+                      out{" "}
+                      <Box
+                        component="span"
+                        fontWeight={700}
+                        sx={{ color: "text.primary" }}
+                      >
+                        {selected.estimated_output_tokens.toLocaleString()}
+                      </Box>
+                    </Typography>
+                    <Typography
+                      fontSize={12}
+                      color="text.secondary"
+                      sx={{ flexShrink: 0 }}
+                    >
+                      cost{" "}
+                      <Box
+                        component="span"
+                        fontWeight={700}
+                        sx={{ color: "text.primary" }}
+                      >
+                        ${selected.estimated_cost_usd.toFixed(4)}
+                      </Box>
+                    </Typography>
+                    {selected.stop_reason && (
+                      <>
+                        <Divider orientation="vertical" flexItem />
+                        <Typography
+                          fontSize={12}
+                          fontWeight={500}
+                          sx={{ color: "#b45309", flexShrink: 0 }}
+                        >
+                          {selected.stop_reason}
+                        </Typography>
+                      </>
+                    )}
+                    <Divider orientation="vertical" flexItem />
+                    <Typography
+                      fontSize={11}
+                      fontFamily="ui-monospace, monospace"
+                      sx={{
+                        bgcolor: "#f1f5f9",
+                        color: "#475569",
+                        px: 0.75,
+                        py: 0.25,
+                        borderRadius: 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {selected.id.slice(0, 8)}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={
+                        <StopCircleOutlinedIcon
+                          sx={{ fontSize: "14px !important" }}
+                        />
+                      }
                       onClick={onStop}
                       disabled={selected.status !== "running"}
-                      style={{
-                        padding: "3px 12px",
-                        borderRadius: 6,
-                        border: "1px solid",
-                        borderColor: selected.status === "running" ? "#dc2626" : "#e5e7eb",
-                        background: selected.status === "running" ? "#fef2f2" : "#f9fafb",
-                        color: selected.status === "running" ? "#dc2626" : "#9ca3af",
-                        cursor: selected.status === "running" ? "pointer" : "not-allowed",
+                      sx={{
+                        textTransform: "none",
                         fontSize: 12,
-                        fontWeight: 500,
+                        py: 0.25,
+                        flexShrink: 0,
                       }}
                     >
                       Stop
-                    </button>
-                  </div>
+                    </Button>
+                  </Box>
                 )}
 
-                {/* Tab bar */}
-                <div
-                  style={{
+                {/* Center tab bar */}
+                <Box
+                  sx={{
                     display: "flex",
-                    gap: 2,
-                    padding: "6px 16px",
-                    borderBottom: "1px solid #f0f0f0",
-                    background: "#fafafa",
+                    gap: 0.25,
+                    px: 2,
+                    py: 0.75,
+                    borderBottom: 1,
+                    borderColor: "divider",
+                    bgcolor: "background.default",
                   }}
                 >
-                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map((tab) => {
-                    const labels: Record<CenterTab, string> = {
-                      terminal: "Terminal (live)",
-                      logs: "Terminal (persisted)",
-                      artifacts: "Artifacts",
-                    };
-                    return (
-                      <button
+                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map(
+                    (tab) => (
+                      <Button
                         key={tab}
+                        size="small"
                         onClick={() => setCenterTab(tab)}
                         disabled={!selectedId}
-                        style={{
-                          padding: "4px 12px",
-                          borderRadius: 6,
-                          border: "none",
-                          background: centerTab === tab ? "#111827" : "transparent",
-                          color: centerTab === tab ? "white" : selectedId ? "#6b7280" : "#d1d5db",
-                          cursor: selectedId ? "pointer" : "not-allowed",
+                        sx={{
+                          textTransform: "none",
                           fontSize: 12,
-                          fontWeight: centerTab === tab ? 600 : 400,
+                          fontWeight: centerTab === tab ? 700 : 400,
+                          bgcolor: "transparent",
+                          color:
+                            centerTab === tab ? "#0891b2" : "text.secondary",
+                          borderRadius: 0,
+                          px: 1.5,
+                          py: 0.75,
+                          borderBottom:
+                            centerTab === tab
+                              ? "2px solid"
+                              : "2px solid transparent",
+                          borderColor:
+                            centerTab === tab ? "#0891b2" : "transparent",
+                          "&:hover": {
+                            bgcolor: "action.hover",
+                            color: "text.primary",
+                          },
+                          "&.Mui-disabled": { color: "text.disabled" },
                         }}
                       >
-                        {labels[tab]}
-                      </button>
-                    );
-                  })}
-                </div>
+                        {centerTabLabels[tab]}
+                      </Button>
+                    ),
+                  )}
+                </Box>
 
-                {/* Terminal/logs/artifacts */}
-                <div style={{ minHeight: 0, overflow: "hidden" }}>
+                {/* Terminal / logs / artifacts */}
+                <Box sx={{ minHeight: 0, overflow: "hidden" }}>
                   {selectedId && centerTab === "terminal" && (
                     <TerminalPane sessionId={selectedId} ws={ws} active />
                   )}
@@ -474,184 +903,135 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     />
                   )}
                   {selectedId && centerTab === "artifacts" && (
-                    <div style={{ height: "100%", overflow: "auto", padding: 16, boxSizing: "border-box" }}>
+                    <Box
+                      sx={{
+                        height: "100%",
+                        overflow: "auto",
+                        p: 2,
+                        boxSizing: "border-box",
+                      }}
+                    >
                       <SessionArtifacts sessionId={selectedId} />
-                    </div>
+                    </Box>
                   )}
                   {!selectedId && (
-                    <div style={{ padding: 20, color: "#9ca3af", fontSize: 13 }}>
+                    <Typography p={2.5} fontSize={13} color="text.secondary">
                       Start a session to see output here.
-                    </div>
+                    </Typography>
                   )}
-                </div>
-              </div>
-            </div>
+                </Box>
+              </Box>
+            </Box>
           )}
-        </div>
-      </div>
+        </Box>
 
-      {/* ── Sessions sidebar ── */}
-      <aside
-        style={{
-          background: "white",
-          display: "grid",
-          gridTemplateRows: "52px 1fr",
-          minHeight: 0,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
+        {/* ── Footer ── */}
+        <Box
+          sx={{
+            borderTop: 1,
+            borderColor: "divider",
+            px: 3,
+            py: 0.75,
             display: "flex",
             alignItems: "center",
-            padding: "0 12px",
-            borderBottom: "1px solid #e5e7eb",
-            gap: 8,
+            justifyContent: "space-between",
+            bgcolor: "#f8fafc",
           }}
         >
-          <span style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>Sessions</span>
-          {sessions.length > 0 && (
-            <span
-              style={{
-                padding: "1px 7px",
-                borderRadius: 999,
-                background: "#f3f4f6",
-                color: "#6b7280",
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              {sessions.filter((s) => s.status === "running").length} running
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
-          <button
-            onClick={() => setShowAllSessions((v) => !v)}
-            style={{
-              padding: "3px 8px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              background: showAllSessions ? "#f3f4f6" : "white",
-              color: "#6b7280",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 500,
-            }}
+          <Typography
+            fontSize={11}
+            sx={{ color: "#94a3b8", fontWeight: 700, letterSpacing: 1 }}
           >
-            {showAllSessions ? "Running only" : "Show all"}
-          </button>
-        </div>
+            AGENT FLEET
+          </Typography>
+          <Typography fontSize={11} sx={{ color: "#94a3b8" }}>
+            Built by{" "}
+            <Box component="span" sx={{ color: "#0891b2", fontWeight: 600 }}>
+              Akhil Singh
+            </Box>
+          </Typography>
+        </Box>
+      </Box>
 
-        <div style={{ overflow: "auto" }}>
-          {sessions.filter((s) => showAllSessions || s.status === "running").length === 0 ? (
-            <div style={{ padding: "16px", color: "#9ca3af", fontSize: 13 }}>
-              {showAllSessions ? "No sessions yet." : "No running sessions."}
-            </div>
-          ) : (
-            sessions.filter((s) => showAllSessions || s.status === "running").map((s) => {
-              const isSelected = s.id === selectedId;
-              const canDelete = s.status !== "running";
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    position: "relative",
-                    borderBottom: "1px solid #f3f4f6",
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      if (s.command === "[claude-sdk]") setLeftTab("claude_sdk");
-                      else if (s.command === "[litellm-chat]") setLeftTab("litellm");
-                      else setLeftTab("shell");
-                      setSelectedId(s.id);
-                    }}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "10px 36px 10px 14px",
-                      border: "none",
-                      borderLeft: isSelected ? "3px solid #111827" : "3px solid transparent",
-                      background: isSelected ? "#f8f8f8" : "white",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-                      <StatusDot status={s.status} />
-                      <span style={{ fontSize: 11, color: "#9ca3af" }}>
-                        {s.status} · {new Date(s.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", marginBottom: 2 }}>
-                      {s.command}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#6b7280",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {s.repo_path}
-                    </div>
-                  </button>
-
-                  {canDelete && (
-                    <button
-                      title="Delete session"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSession(s.id)
-                          .then(() => {
-                            if (selectedId === s.id) setSelectedId(null);
-                            return refreshSessions(false);
-                          })
-                          .catch((err) => setError(String(err)));
-                      }}
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        width: 20,
-                        height: 20,
-                        padding: 0,
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        color: "#d1d5db",
-                        fontSize: 13,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderRadius: 4,
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
-                        (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.color = "#d1d5db";
-                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </aside>
-    </div>
+      {/* ── Sessions sidebar ── */}
+      <SessionsSidebar
+        sessions={sessions}
+        selectedId={selectedId}
+        showAll={showAllSessions}
+        onToggleShowAll={() => setShowAllSessions((v) => !v)}
+        onSelect={onSelectSession}
+        onDelete={onDeleteSession}
+      />
+    </Box>
   );
 }
 
+// ── Light theme (fixed — used by MainApp only) ────────────────────────────────
+
+const lightTheme = createTheme({
+  palette: {
+    mode: "light",
+    background: { default: "#f3f4f8", paper: "#ffffff" },
+    primary: { main: "#4f46e5" },
+    secondary: { main: "#0ea5e9" },
+    success: { main: "#16a34a" },
+    error: { main: "#dc2626" },
+    warning: { main: "#d97706" },
+    divider: "#e5e7eb",
+    text: { primary: "#111827", secondary: "#6b7280", disabled: "#9ca3af" },
+  },
+  typography: {
+    fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+  },
+  shape: { borderRadius: 8 },
+  components: {
+    MuiButton: {
+      defaultProps: { disableElevation: true },
+      styleOverrides: {
+        root: { textTransform: "none", fontWeight: 500 },
+        contained: { boxShadow: "none" },
+      },
+    },
+    MuiTextField: {
+      defaultProps: { size: "small" },
+      styleOverrides: {
+        root: {
+          "& .MuiOutlinedInput-root": {
+            borderRadius: 7,
+            backgroundColor: "#ffffff",
+          },
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: { backgroundImage: "none" },
+        outlined: { borderColor: "#e5e7eb" },
+      },
+    },
+    MuiChip: {
+      styleOverrides: { root: { fontWeight: 500 } },
+    },
+    MuiDivider: {
+      styleOverrides: { root: { borderColor: "#e5e7eb" } },
+    },
+  },
+});
+
+// ── Root ──────────────────────────────────────────────────────────────────────
+
 export default function App() {
   const [page, setPage] = useState<"main" | "dashboard">("main");
-  return page === "dashboard"
-    ? <Dashboard onBack={() => setPage("main")} />
-    : <MainApp onDashboard={() => setPage("dashboard")} />;
+
+  // Dashboard has its own ThemeProvider + toggle internally.
+  // MainApp is always light — its child components (ClaudeSdkChat, SessionArtifacts, etc.)
+  // have hardcoded light colors that can't be toggled without rewriting them.
+  return page === "dashboard" ? (
+    <Dashboard onBack={() => setPage("main")} />
+  ) : (
+    <ThemeProvider theme={lightTheme}>
+      <CssBaseline />
+      <MainApp onDashboard={() => setPage("dashboard")} />
+    </ThemeProvider>
+  );
 }

@@ -461,35 +461,41 @@ export default function ClaudeSdkChat(props: Props) {
                 gap: 10,
                 fontSize: 12,
                 color: "#6b7280",
-                padding: "6px 10px",
-                background: "#f9fafb",
+                padding: "7px 12px",
+                background: "#f8fafc",
                 borderRadius: 8,
                 border: "1px solid #e5e7eb",
-                flexWrap: "wrap",
+                minWidth: 0,
               }}
             >
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: session.status === "running" ? "#16a34a" : "#9ca3af",
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ color: "#374151", fontWeight: 500 }}>{session.status}</span>
-              <span style={{ color: "#d1d5db" }}>·</span>
-              <span>id=<b style={{ fontFamily: "ui-monospace, monospace" }}>{session.id.slice(0, 8)}</b></span>
-              <span>in=<b>{usage?.inputTokens ?? session.estimated_input_tokens}</b></span>
-              <span>out=<b>{usage?.outputTokens ?? session.estimated_output_tokens}</b></span>
-              {usage?.thinkingTokens ? <span>think=<b>{usage.thinkingTokens}</b></span> : null}
-              {usage?.cacheReadTokens ? <span>cR=<b>{usage.cacheReadTokens}</b></span> : null}
-              {usage?.cacheWriteTokens ? <span>cW=<b>{usage.cacheWriteTokens}</b></span> : null}
-              <span>cost=<b>${session.estimated_cost_usd.toFixed(6)}</b></span>
-              {session.budget_usd ? <span>/ <b>${session.budget_usd}</b></span> : null}
-              {session.stop_reason ? <span style={{ color: "#dc2626" }}>{session.stop_reason}</span> : null}
-              <div style={{ flex: 1 }} />
+              {/* Status badge */}
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 4, flexShrink: 0,
+                background: session.status === "running" ? "#dcfce7" : session.status === "error" ? "#fee2e2" : "#f1f5f9",
+                color: session.status === "running" ? "#15803d" : session.status === "error" ? "#dc2626" : "#475569",
+              }}>{session.status}</span>
+              {/* Repo path */}
+              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 500, color: "#111827", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={session.repo_path}>
+                {session.repo_path}
+              </span>
+              <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
+              <span style={{ flexShrink: 0 }}>in <b style={{ color: "#111827" }}>{(usage?.inputTokens ?? session.estimated_input_tokens).toLocaleString()}</b></span>
+              <span style={{ flexShrink: 0 }}>out <b style={{ color: "#111827" }}>{(usage?.outputTokens ?? session.estimated_output_tokens).toLocaleString()}</b></span>
+              {usage?.thinkingTokens ? <span style={{ flexShrink: 0 }}>think <b style={{ color: "#111827" }}>{usage.thinkingTokens.toLocaleString()}</b></span> : null}
+              {usage?.cacheReadTokens ? <span style={{ flexShrink: 0 }}>cR <b style={{ color: "#111827" }}>{usage.cacheReadTokens.toLocaleString()}</b></span> : null}
+              {usage?.cacheWriteTokens ? <span style={{ flexShrink: 0 }}>cW <b style={{ color: "#111827" }}>{usage.cacheWriteTokens.toLocaleString()}</b></span> : null}
+              <span style={{ flexShrink: 0 }}>cost <b style={{ color: "#111827" }}>${session.estimated_cost_usd.toFixed(4)}</b></span>
+              {session.budget_usd ? <span style={{ flexShrink: 0, color: "#9ca3af" }}>/ ${session.budget_usd}</span> : null}
+              {session.stop_reason ? (
+                <>
+                  <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
+                  <span style={{ color: "#b45309", fontWeight: 500, flexShrink: 0 }}>{session.stop_reason}</span>
+                </>
+              ) : null}
+              <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, background: "#f1f5f9", color: "#475569", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
+                {session.id.slice(0, 8)}
+              </span>
               {session.status === "running" && (
                 <button
                   onClick={() => {
@@ -506,6 +512,7 @@ export default function ClaudeSdkChat(props: Props) {
                     cursor: "pointer",
                     fontSize: 12,
                     fontWeight: 500,
+                    flexShrink: 0,
                   }}
                 >
                   Stop

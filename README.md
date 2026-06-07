@@ -11,6 +11,10 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
+- **PR #5: Screenshot refresh + dashboard history updates**
+  - Updated the README demo images to match the latest screenshot set
+  - Added refreshed history and dashboard visuals for the current UI and spend analytics views
+  - Kept the product docs aligned with the current MVP surface
 - **PR #4: Spend analytics dashboard + session lifecycle improvements**
   - Added a spend dashboard with breakdowns by day, repo, command, and model
   - Improved server-side session stopping and timeout handling for chat sessions
@@ -53,25 +57,25 @@ This repository contains a **working MVP**:
 
 - Claude (SDK) session
 
-![New Claude SDK session](screenshots/New_Session_Claude_SDK.jpg)
+![New Claude SDK session](screenshots/New_Session_Claude_SDK.png)
 
 - LiteLLM session
 
-![New LiteLLM session](screenshots/New_Session_LiteLLM.jpg)
+![New LiteLLM session](screenshots/New_Session_LiteLLM.png)
 
 **Interactive sessions**
 
 - Claude Code / PTY session
 
-![Claude interactive session](screenshots/claude.jpg)
+![Claude interactive session](screenshots/claude.jpg.png)
 
 - OpenAI Codex / PTY session
 
-![Codex interactive session](screenshots/codex.jpg)
+![Codex interactive session](screenshots/codex.png)
 
 - Codex scrollback / persisted terminal replay
 
-![Codex scrollable terminal](screenshots/codex_scrollable_terminal.jpg)
+![Codex scrollable terminal](screenshots/codex_scrollable_terminal.jpg.png)
 
 **Claude SDK chat flow**
 
@@ -81,25 +85,25 @@ This repository contains a **working MVP**:
 
 - Command approval gate
 
-![Claude SDK approval gate](screenshots/claude_sdk_approval_gate.jpg)
+![Claude SDK approval gate](screenshots/claude_sdk_approval_gate.jpg.png)
 
 - Approval accepted
 
-![Claude SDK approval accepted](screenshots/claude_sdk_approval_gate_approved.jpg)
+![Claude SDK approval accepted](screenshots/claude_sdk_approval_gate_approved.jpg.png)
 
 - Approval rejected
 
-![Claude SDK approval rejected](screenshots/claude_sdk_approval_gate_rejected.jpg)
+![Claude SDK approval rejected](screenshots/claude_sdk_approval_gate_rejected.jpg.png)
 
 - Persisted chat history
 
-![Claude SDK history](screenshots/claude_sdk_History.jpg)
+![Claude SDK history](screenshots/litellm_chat_History.png)
 
 **Per-session artifacts (git diff snapshots)**
 
 - Git diff snapshot
 
-![Git diff snapshot](screenshots/new_git_diff.jpg)
+![Git diff snapshot](screenshots/new_git_diff_long.png)
 
 **Spend dashboards / budget tracking**
 
@@ -109,7 +113,7 @@ This repository contains a **working MVP**:
 
 - Spend dashboard today
 
-
+![Spend dashboard today](screenshots/Spend_Dashboard_today.png)
 
 - Spend dashboard 7 days
 
@@ -292,11 +296,11 @@ Screenshots:
 
 - Claude SDK tool call + output
 
-![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg)
+![Claude SDK tool call](screenshots/claude_sdk_approval_gate.jpg.png)
 
 - Claude SDK tool permission gate (Approve/Reject)
 
-![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg)
+![Claude SDK tool permission](screenshots/claude_sdk_approval_gate_rejected.jpg.png)
 
 ### LiteLLM Chat (proxy support)
 **Use your enterprise URL and API key to access multiple models through a LiteLLM proxy.**
