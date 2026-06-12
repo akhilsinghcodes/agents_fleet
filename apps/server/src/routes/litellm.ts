@@ -17,6 +17,7 @@ import {
   storeLiteLlmConfig,
   storeLiteLlmMessage,
   updateLiteLlmSessionEstimatesFromUsage,
+  getValidModelIds,
 } from "../litellm";
 import type { ProcessManager } from "../processManager";
 
@@ -58,7 +59,11 @@ export function liteLlmRouter(_processManager: ProcessManager): Router {
       return jsonError(res, 400, "model is required");
     }
     if (!isValidLiteLlmModel(model)) {
-      return jsonError(res, 400, "model must match apps/server/src/models.json");
+      return jsonError(
+        res,
+        400,
+        "model is not available in LITELLM_BASE_URL or models.json"
+      );
     }
 
     const budgetUsd = body?.budgetUsd;
@@ -199,6 +204,19 @@ export function liteLlmRouter(_processManager: ProcessManager): Router {
       }
     },
   );
+
+  // Endpoint to get available models (dynamically fetched from LITELLM_BASE_URL or fallback)
+  router.get("/litellm/models", async (_req: Request, res: Response) => {
+    try {
+      const modelIds = await getValidModelIds();
+      const sortedModels = Array.from(modelIds).sort((a, b) =>
+        a.localeCompare(b),
+      );
+      return res.json({ models: sortedModels });
+    } catch (error) {
+      return jsonError(res, 500, `Failed to get models: ${String(error)}`);
+    }
+  });
 
   return router;
 }
