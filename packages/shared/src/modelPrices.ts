@@ -123,11 +123,6 @@ export const CLAUDE_SDK_MODEL_OPTIONS = (modelList.data ?? [])
   .filter(isString)
   .sort((a, b) => a.localeCompare(b));
 
-export const LITELLM_CHAT_MODEL_OPTIONS = (modelList.data ?? [])
-  .map((item) => item.id)
-  .filter(isString)
-  .sort((a, b) => a.localeCompare(b));
-
 export function getClaudeSdkModelPricing(modelId: string): ModelPriceLookup {
   const pricing = lookupClaudePriceEntry(modelId);
   return {
@@ -143,5 +138,3 @@ export function getLiteLlmModelPricing(modelId: string): ModelPriceLookup {
 }
 
 export type ClaudeSdkModelOption = (typeof CLAUDE_SDK_MODEL_OPTIONS)[number];
-export type LiteLlmChatModelOption =
-  (typeof LITELLM_CHAT_MODEL_OPTIONS)[number];
