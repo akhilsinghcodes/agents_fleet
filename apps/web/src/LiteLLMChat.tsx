@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getLiteLlmModelPricing } from "@agents_fleet/shared";
+import {
+  LITELLM_CHAT_MODEL_OPTIONS,
+  getLiteLlmModelPricing,
+} from "@agents_fleet/shared";
 import type { Session, WsServerMessage } from "@agents_fleet/shared";
 import {
   createLiteLlmSession,
@@ -49,8 +52,9 @@ function nowIso() {
 
 export default function LiteLLMChat(props: Props) {
   const [repoPath, setRepoPath] = useState("");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [model, setModel] = useState<string>("gpt-4o-mini");
+  const [model, setModel] = useState<string>(
+    LITELLM_CHAT_MODEL_OPTIONS[0] ?? "gpt-4o-mini",
+  );
   const [budgetUsd, setBudgetUsd] = useState<string>("");
   const [session, setSession] = useState<Session | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -65,30 +69,13 @@ export default function LiteLLMChat(props: Props) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const subscribedSessionRef = useRef<string | null>(null);
+  const startPromiseRef = useRef<Promise<Session> | null>(null);
   const activeStreamRef = useRef<{
     sessionId: string;
     assistantItemId: string;
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  // Fetch available models from the backend
-  useEffect(() => {
-    fetch("/api/litellm/models")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.models && Array.isArray(data.models)) {
-          setAvailableModels(data.models);
-          // Update model selection if current selection is not in new list
-          if (!data.models.includes(model)) {
-            setModel(data.models[0] ?? "gpt-4o-mini");
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn("Failed to fetch available models:", err);
-        // Fall back to static list on error
-      });
-  }, []);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -127,11 +114,7 @@ export default function LiteLLMChat(props: Props) {
       }
 
       if (msg.type === "litellm_tool_request") {
-        if (
-          msg.sessionId !==
-          (wsRef.current ? subscribedSessionRef.current : null)
-        )
-          return;
+        if (msg.sessionId !== (wsRef.current ? subscribedSessionRef.current : null)) return;
         setItems((prev) => [
           ...prev,
           {
@@ -238,20 +221,24 @@ export default function LiteLLMChat(props: Props) {
       throw new Error("repoPath is required");
     }
 
-    const created = await createLiteLlmSession({
+    // Return in-flight promise if creation already started — prevents duplicate
+    // sessions when onFocus and onSend race.
+    if (startPromiseRef.current) return startPromiseRef.current;
+
+    startPromiseRef.current = createLiteLlmSession({
       repoPath: repoPath.trim(),
       model,
       budgetUsd: budgetUsd.trim().length > 0 ? Number(budgetUsd) : undefined,
+    }).then((created) => {
+      setSession(created);
+      setRepoPath(created.repo_path);
+      const ws = openChatWs();
+      void subscribeChatWs(ws, created.id);
+      props.onCreated(created);
+      return created;
     });
 
-    setSession(created);
-    setRepoPath(created.repo_path);
-
-    const ws = openChatWs();
-    void subscribeChatWs(ws, created.id);
-
-    props.onCreated(created);
-    return created;
+    return startPromiseRef.current;
   }
 
   async function ensureSessionReady() {
@@ -284,18 +271,14 @@ export default function LiteLLMChat(props: Props) {
           (artifact) => artifact.kind === "litellm_chat_config_v1",
         );
         if (configArtifact) {
-          const parsed = JSON.parse(configArtifact.content) as {
-            model?: unknown;
-          };
+          const parsed = JSON.parse(configArtifact.content) as { model?: unknown };
           if (typeof parsed.model === "string") {
             setModel(parsed.model);
           }
         }
         setRepoPath(current.repo_path);
         setBudgetUsd(
-          typeof current.budget_usd === "number"
-            ? String(current.budget_usd)
-            : "",
+          typeof current.budget_usd === "number" ? String(current.budget_usd) : "",
         );
 
         const nextItems: Item[] = json.artifacts
@@ -314,9 +297,7 @@ export default function LiteLLMChat(props: Props) {
                   ? ("user" as const)
                   : ("assistant" as const),
               text:
-                typeof parsed.text === "string"
-                  ? parsed.text
-                  : artifact.content,
+                typeof parsed.text === "string" ? parsed.text : artifact.content,
               ts: artifact.timestamp,
             };
           });
@@ -344,6 +325,7 @@ export default function LiteLLMChat(props: Props) {
 
     const text = input;
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
 
     let sessionId: string;
     try {
@@ -369,13 +351,7 @@ export default function LiteLLMChat(props: Props) {
     setItems((prev) => [
       ...prev,
       { kind: "message", id: userItemId, role: "user", text, ts: nowIso() },
-      {
-        kind: "message",
-        id: assistantItemId,
-        role: "assistant",
-        text: "",
-        ts: nowIso(),
-      },
+      { kind: "message", id: assistantItemId, role: "assistant", text: "", ts: nowIso() },
     ]);
 
     activeStreamRef.current = { sessionId, assistantItemId };
@@ -410,92 +386,28 @@ export default function LiteLLMChat(props: Props) {
             }}
           >
             {/* Status badge */}
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "1px 7px",
-                borderRadius: 4,
-                flexShrink: 0,
-                background:
-                  session.status === "running"
-                    ? "#dcfce7"
-                    : session.status === "error"
-                      ? "#fee2e2"
-                      : "#f1f5f9",
-                color:
-                  session.status === "running"
-                    ? "#15803d"
-                    : session.status === "error"
-                      ? "#dc2626"
-                      : "#475569",
-              }}
-            >
-              {session.status}
-            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 4, flexShrink: 0,
+              background: session.status === "running" ? "#dcfce7" : session.status === "error" ? "#fee2e2" : "#f1f5f9",
+              color: session.status === "running" ? "#15803d" : session.status === "error" ? "#dc2626" : "#475569",
+            }}>{session.status}</span>
             {/* Repo path */}
-            <span
-              style={{
-                fontFamily: "ui-monospace, monospace",
-                fontSize: 13,
-                fontWeight: 500,
-                color: "#111827",
-                flex: 1,
-                minWidth: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              title={session.repo_path}
-            >
+            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 500, color: "#111827", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={session.repo_path}>
               {session.repo_path}
             </span>
             <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
-            <span style={{ flexShrink: 0 }}>
-              in{" "}
-              <b style={{ color: "#111827" }}>
-                {session.estimated_input_tokens.toLocaleString()}
-              </b>
-            </span>
-            <span style={{ flexShrink: 0 }}>
-              out{" "}
-              <b style={{ color: "#111827" }}>
-                {session.estimated_output_tokens.toLocaleString()}
-              </b>
-            </span>
-            <span style={{ flexShrink: 0 }}>
-              cost{" "}
-              <b style={{ color: "#111827" }}>
-                ${session.estimated_cost_usd.toFixed(4)}
-              </b>
-            </span>
-            {session.budget_usd ? (
-              <span style={{ flexShrink: 0, color: "#9ca3af" }}>
-                / ${session.budget_usd}
-              </span>
-            ) : null}
+            <span style={{ flexShrink: 0 }}>in <b style={{ color: "#111827" }}>{session.estimated_input_tokens.toLocaleString()}</b></span>
+            <span style={{ flexShrink: 0 }}>out <b style={{ color: "#111827" }}>{session.estimated_output_tokens.toLocaleString()}</b></span>
+            <span style={{ flexShrink: 0 }}>cost <b style={{ color: "#111827" }}>${session.estimated_cost_usd.toFixed(4)}</b></span>
+            {session.budget_usd ? <span style={{ flexShrink: 0, color: "#9ca3af" }}>/ ${session.budget_usd}</span> : null}
             {session.stop_reason ? (
               <>
                 <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
-                <span
-                  style={{ color: "#b45309", fontWeight: 500, flexShrink: 0 }}
-                >
-                  {session.stop_reason}
-                </span>
+                <span style={{ color: "#b45309", fontWeight: 500, flexShrink: 0 }}>{session.stop_reason}</span>
               </>
             ) : null}
             <span style={{ color: "#e5e7eb", flexShrink: 0 }}>|</span>
-            <span
-              style={{
-                fontFamily: "ui-monospace, monospace",
-                fontSize: 11,
-                background: "#f1f5f9",
-                color: "#475569",
-                padding: "2px 6px",
-                borderRadius: 4,
-                flexShrink: 0,
-              }}
-            >
+            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, background: "#f1f5f9", color: "#475569", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
               {session.id.slice(0, 8)}
             </span>
             {session.status === "running" && (
@@ -553,7 +465,7 @@ export default function LiteLLMChat(props: Props) {
                 border: "1px solid #d1d5db",
               }}
             >
-              {availableModels.map((option) => (
+              {LITELLM_CHAT_MODEL_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -618,15 +530,12 @@ export default function LiteLLMChat(props: Props) {
                   background: "#111827",
                 }}
               >
-                <div
-                  style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}
-                >
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
                   tool: bash • {new Date(item.ts).toLocaleTimeString()}
                 </div>
                 <div
                   style={{
-                    fontFamily:
-                      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                     fontSize: 12,
                     color: "#fbbf24",
                     marginBottom: 6,
@@ -645,30 +554,14 @@ export default function LiteLLMChat(props: Props) {
                         if (!ws || !sid) return;
                         setItems((prev) =>
                           prev.map((i) =>
-                            i.kind === "tool" &&
-                            i.toolCallId === item.toolCallId
+                            i.kind === "tool" && i.toolCallId === item.toolCallId
                               ? { ...i, status: "approved" }
                               : i,
                           ),
                         );
-                        ws.send(
-                          JSON.stringify({
-                            type: "litellm_tool_decision",
-                            sessionId: sid,
-                            toolCallId: item.toolCallId,
-                            approved: true,
-                          }),
-                        );
+                        ws.send(JSON.stringify({ type: "litellm_tool_decision", sessionId: sid, toolCallId: item.toolCallId, approved: true }));
                       }}
-                      style={{
-                        padding: "3px 10px",
-                        borderRadius: 6,
-                        border: "1px solid #16a34a",
-                        background: "#14532d",
-                        color: "#86efac",
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
+                      style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #16a34a", background: "#14532d", color: "#86efac", cursor: "pointer", fontSize: 12 }}
                     >
                       Approve
                     </button>
@@ -679,30 +572,14 @@ export default function LiteLLMChat(props: Props) {
                         if (!ws || !sid) return;
                         setItems((prev) =>
                           prev.map((i) =>
-                            i.kind === "tool" &&
-                            i.toolCallId === item.toolCallId
+                            i.kind === "tool" && i.toolCallId === item.toolCallId
                               ? { ...i, status: "denied" }
                               : i,
                           ),
                         );
-                        ws.send(
-                          JSON.stringify({
-                            type: "litellm_tool_decision",
-                            sessionId: sid,
-                            toolCallId: item.toolCallId,
-                            approved: false,
-                          }),
-                        );
+                        ws.send(JSON.stringify({ type: "litellm_tool_decision", sessionId: sid, toolCallId: item.toolCallId, approved: false }));
                       }}
-                      style={{
-                        padding: "3px 10px",
-                        borderRadius: 6,
-                        border: "1px solid #dc2626",
-                        background: "#450a0a",
-                        color: "#fca5a5",
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
+                      style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #dc2626", background: "#450a0a", color: "#fca5a5", cursor: "pointer", fontSize: 12 }}
                     >
                       Deny
                     </button>
@@ -717,36 +594,13 @@ export default function LiteLLMChat(props: Props) {
                 {item.status === "done" && (
                   <div>
                     {item.stdout && (
-                      <pre
-                        style={{
-                          margin: 0,
-                          fontSize: 11,
-                          color: "#d1fae5",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {item.stdout}
-                      </pre>
+                      <pre style={{ margin: 0, fontSize: 11, color: "#d1fae5", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{item.stdout}</pre>
                     )}
                     {item.stderr && (
-                      <pre
-                        style={{
-                          margin: 0,
-                          fontSize: 11,
-                          color: "#fca5a5",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {item.stderr}
-                      </pre>
+                      <pre style={{ margin: 0, fontSize: 11, color: "#fca5a5", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{item.stderr}</pre>
                     )}
-                    <div
-                      style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}
-                    >
-                      exit {item.exitCode} • {item.durationMs}ms
-                      {item.truncated ? " • truncated" : ""}
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+                      exit {item.exitCode} • {item.durationMs}ms{item.truncated ? " • truncated" : ""}
                     </div>
                   </div>
                 )}
@@ -775,10 +629,16 @@ export default function LiteLLMChat(props: Props) {
         <div ref={messagesEndRef} />
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <textarea
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          rows={1}
+          onChange={(e) => {
+            setInput(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${e.target.scrollHeight}px`;
+          }}
           onFocus={() => {
             void ensureSessionReady();
           }}
@@ -791,6 +651,11 @@ export default function LiteLLMChat(props: Props) {
             padding: "10px 12px",
             borderRadius: 12,
             border: "1px solid #d1d5db",
+            resize: "none",
+            overflow: "hidden",
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: 1.5,
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

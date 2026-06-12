@@ -162,11 +162,23 @@ export type WsServerMessage =
       exitCode: number;
       truncated: boolean;
       durationMs: number;
+    }
+  | {
+      type: "budget_warning";
+      sessionId: string;
+      pctUsed: number;
+      kind: "usd" | "tokens";
+      current: number;
+      budget: number;
     };
 
 export {
-  CLAUDE_SDK_MODEL_OPTIONS,
-  getClaudeSdkModelPricing,
-  getLiteLlmModelPricing,
+    CLAUDE_SDK_MODEL_OPTIONS, getClaudeSdkModelPricing,
+    getLiteLlmModelPricing, LITELLM_CHAT_MODEL_OPTIONS
 } from "./modelPrices";
-export type { ClaudeSdkModelOption, ModelPriceLookup } from "./modelPrices";
+export type {
+    ClaudeSdkModelOption,
+    LiteLlmChatModelOption,
+    ModelPriceLookup
+} from "./modelPrices";
+

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -125,5 +126,33 @@ export function getDb(): Db {
 }
 
 export async function bootstrapDb(): Promise<void> {
-  getDb();
+  const db = getDb();
+
+  // Recover orphaned sessions: any session still marked 'running' at startup
+  // was never cleaned up (server crash, forced kill, etc.). Mark them stopped.
+  const now = new Date().toISOString();
+  const orphans = db
+    .prepare("SELECT id FROM sessions WHERE status = 'running'")
+    .all() as { id: string }[];
+
+  if (orphans.length > 0) {
+    const markStopped = db.prepare(
+      `UPDATE sessions SET status = 'stopped', ended_at = ?, stop_reason = 'crash_recovery'
+       WHERE id = ?`,
+    );
+    const insertMarker = db.prepare(
+      `INSERT INTO session_markers (id, session_id, timestamp, kind)
+       VALUES (?, ?, ?, 'crash_recovery')`,
+    );
+    const tx = db.transaction(() => {
+      for (const { id } of orphans) {
+        markStopped.run(now, id);
+        insertMarker.run(crypto.randomUUID(), id, now);
+      }
+    });
+    tx();
+    console.log(
+      `[crash-recovery] Marked ${orphans.length} orphaned session(s) as stopped.`,
+    );
+  }
 }

@@ -1,12 +1,12 @@
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
+import type {
+    CreateSessionRequest,
+    Session,
+    SessionArtifact,
+} from "@agents_fleet/shared";
 import type { Request, Response, Router } from "express";
 import { Router as createRouter } from "express";
-import type {
-  CreateSessionRequest,
-  Session,
-  SessionArtifact,
-} from "@agents_fleet/shared";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import { getDb } from "../db";
 import type { ProcessManager } from "../processManager";
 
@@ -259,6 +259,8 @@ export function sessionsRouter(processManager: ProcessManager): Router {
 
     res.json({ markers });
   });
+
+
 
   /**
    * GET /api/sessions/:id/artifacts?limit=...&offset=...&kind=...&latest=1

@@ -227,6 +227,7 @@ export function dashboardRouter(): Router {
           ORDER BY timestamp DESC LIMIT 1
         )
       WHERE s.created_at BETWEEN ? AND ?
+        AND JSON_VALID(sa.content)
         AND JSON_EXTRACT(sa.content, '$.model') IS NOT NULL
       GROUP BY JSON_EXTRACT(sa.content, '$.model'), s.command
       ORDER BY total_cost DESC`,
@@ -331,6 +332,38 @@ export function dashboardRouter(): Router {
       },
       daily_spend: dailySpend,
     });
+  });
+
+  /**
+   * GET /api/dashboard/litellm/spend?from=YYYY-MM-DD&to=YYYY-MM-DD
+   * Proxy to LiteLLM spend endpoints. Returns { configured: false } if env vars missing.
+   */
+  router.get("/dashboard/litellm/spend", async (req: Request, res: Response) => {
+    const baseUrl = process.env.LITELLM_BASE_URL?.replace(/\/$/, "");
+    const apiKey = process.env.LITELLM_API_KEY;
+
+    if (!baseUrl || !apiKey) {
+      return res.json({ configured: false });
+    }
+
+    const { from, to } = req.query;
+    const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+
+    try {
+      // /spend/logs returns array of daily objects: { startTime, spend, models: {model: cost} }
+      // /user/daily/activity returns { results: [{ date, metrics: { spend, prompt_tokens, ... } }] }
+      const [logsRes, activityRes] = await Promise.all([
+        fetch(`${baseUrl}/spend/logs?start_date=${from ?? ""}&end_date=${to ?? ""}`, { headers }),
+        fetch(`${baseUrl}/user/daily/activity?start_date=${from ?? ""}&end_date=${to ?? ""}`, { headers }),
+      ]);
+
+      const spendLogs = logsRes.ok ? await logsRes.json() : [];
+      const activityRaw = activityRes.ok ? await activityRes.json() : null;
+
+      return res.json({ configured: true, spendLogs, activity: activityRaw });
+    } catch (e) {
+      return res.status(502).json({ error: { message: `LiteLLM proxy error: ${String(e)}` } });
+    }
   });
 
   return router;
