@@ -11,21 +11,31 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
-- **PR #5: Screenshot refresh + dashboard history updates**
-  - Updated the README demo images to match the latest screenshot set
-  - Added refreshed history and dashboard visuals for the current UI and spend analytics views
-  - Kept the product docs aligned with the current MVP surface
-- **PR #4: Spend analytics dashboard + session lifecycle improvements**
-  - Added a spend dashboard with breakdowns by day, repo, command, and model
-  - Improved server-side session stopping and timeout handling for chat sessions
-  - Refreshed product docs/screenshots to match the dashboard UI
-- **PR #3: LiteLLM chat + terminal replay improvements**
-  - Added LiteLLM-backed chat support with model selection and the same approve/reject tool flow used by Claude SDK
-  - Improved persisted PTY replay by stripping alternate-screen escape sequences more reliably
-  - Refreshed the README screenshots and demo assets to match the current MVP
-- **PR #2: Real-time usage tracking**
-  - Parse Claude Code status lines for more accurate token/cost counting instead of estimates
-  - Budget enforcement that actually works
+- **LiteLLM Spend Analytics tab** (latest)
+  - Real spend data pulled from your LiteLLM proxy (`/spend/logs`, `/user/daily/activity`)
+  - Matches Agents Fleet layout: header stats, This Week chart, Weekly Budget strip, By Model and Daily tabs
+  - Weekly budget resets Sunday; projects spend and flags over-budget
+- **Budget 80% warning notifications**
+  - Native browser notification + in-app toast when a session reaches 80% of its USD or token budget
+  - Toast auto-dismisses after 8s; works even when browser notifications are blocked
+- **One-click session resume** (latest)
+  - `claude --resume <uuid>` and `codex resume <uuid>` commands are captured automatically on session exit and shown in the Artifacts tab
+  - **Resume** button spawns a new shell session instantly — no copy-paste needed
+  - Backfilled across all historical sessions in the database
+- **Graceful session exit for Claude and Codex** (latest)
+  - Stop button sends Ctrl+C → `/exit` instead of hard-killing, giving Claude/Codex time to save state and print the resume command before exiting
+- **Interactive Git Diff Viewer**
+  - Side-by-side diff display with line-by-line numbering
+  - Paired removed/added lines render adjacent for easy comparison
+  - File-level grouping with syntax coloring
+- **Spend Analytics Dashboard**
+  - View total spend by month, week, or day
+  - Drill down by repo, command, or model
+  - Real-time cost tracking with USD budgets
+- **Budget Tracking in Session Header**
+  - Display token budgets (input + output combined) and USD budgets side-by-side with current usage
+  - Shows on all tabs: Shell, Claude (SDK), LiteLLM
+  - Example: `total 81,772 / 100,000  budget $1.23 / $5.00`
 This repository contains a **working MVP**:
 - pnpm workspace monorepo
 - React + Vite + TypeScript “Mission Control” web app
@@ -43,7 +53,7 @@ This repository contains a **working MVP**:
 
 **Mission control overview**
 
-![Mission control overview](screenshots/AI_Agent_Mission_Control_System.png)
+![Mission control overview](screenshots/AI_Agent_Mission_Control_Overview.png)
 
 **Local-first architecture**
 
@@ -53,7 +63,7 @@ This repository contains a **working MVP**:
 
 - Shell session
 
-![New shell session](screenshots/New_Session_Shell.jpg)
+![New shell session](screenshots/New_Session_Shell.png)
 
 - Claude (SDK) session
 
@@ -81,7 +91,7 @@ This repository contains a **working MVP**:
 
 - Chat conversation view
 
-![Claude SDK chat](screenshots/claude_sdk_Chat.jpg)
+![Claude SDK chat](screenshots/claude_sdk_approval_gate.jpg.png)
 
 - Command approval gate
 
@@ -101,15 +111,15 @@ This repository contains a **working MVP**:
 
 **Per-session artifacts (git diff snapshots)**
 
-- Git diff snapshot
+- Git diff viewer (side-by-side, file tabs)
 
-![Git diff snapshot](screenshots/new_git_diff_long.png)
+![Git diff viewer](screenshots/git_diff_viewer.png)
 
 **Spend dashboards / budget tracking**
 
 - Default spend dashboard
 
-![Spend dashboard default view](screenshots/Spend_Dashboard_Default_View.png)
+![Spend dashboard default view](screenshots/Spend_Dashboard_Month.png)
 
 - Spend dashboard today
 
@@ -131,6 +141,40 @@ This repository contains a **working MVP**:
 
 ![Spend dashboard by model](screenshots/Spend_Dashboard_By_Model.png)
 
+**Session resume**
+
+- Resume artifact in Artifacts tab with Copy + Resume button
+
+![Session resume artifact](screenshots/Session_Resume_Artifact.png)
+
+- Resumed session live terminal
+
+![Session resume terminal](screenshots/Session_Resume_Terminal.png)
+
+**LiteLLM Spend Analytics**
+
+- By Model tab — real spend breakdown from proxy
+
+![LiteLLM spend by model](screenshots/LiteLLM_Spend_By_Model.png)
+
+- Daily tab — per-day requests, tokens, and spend
+
+![LiteLLM spend daily](screenshots/LiteLLM_Spend_Daily.png)
+
+**Budget warnings**
+
+- In-app toast (shown when browser notifications are blocked or as a persistent overlay)
+
+![Budget warning toast](screenshots/Budget_Warning_Toast.png)
+
+- Native browser notification
+
+![Budget warning notification](screenshots/Budget_Warning_Notification.png)
+
+- Browser notification permission prompt
+
+![Budget warning permission](screenshots/Budget_Warning_Permission.png)
+
 **SQLite persistence / debug views**
 
 - Sessions table
@@ -143,7 +187,7 @@ This repository contains a **working MVP**:
 
 ### Videos
 
-- `screenshots/AgentFleet_Mission_Control.mp4`
+- `screenshots/AgentFleet__AI_Mission_Control.mp4`
 
 The MVP persists several tables in `data/agents_fleet.sqlite`:
 
@@ -159,7 +203,7 @@ The MVP persists several tables in `data/agents_fleet.sqlite`:
 
 > Tip: GitHub renders MP4 previews nicely in README. `.mov` files are ignored by default in `.gitignore` to avoid bloating git history.
 
-- `screenshots/Agents_Fleet__Mission_Control_for_Your_Local_AI_Workers.mp4`
+- `screenshots/AgentFleet__AI_Mission_Control.mp4`
 
 ## Architecture
 See `ARCHITECTURE.md`.
@@ -292,7 +336,7 @@ Notes:
 Screenshots:
 - Claude SDK session stopped by budget
 
-![Claude SDK budget stop](screenshots/claude_sdk_Chat.jpg)
+![Claude SDK budget stop](screenshots/claude_sdk_approval_gate.jpg.png)
 
 - Claude SDK tool call + output
 
@@ -332,10 +376,13 @@ If you're running a local or enterprise LiteLLM proxy, Agents Fleet will route a
 
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.
+- **Token budget:** counts **input + output tokens combined**. When `total_tokens >= budget_tokens`, the session stops.
+- **USD budget:** when `estimated_cost >= budget_usd`, the session stops.
 - Token estimation: `ceil(text.length / 4)`.
 - Cost estimation:
-  - shell/PTY sessions use the default rates in `apps/server/src/budget.ts`
+  - shell/PTY sessions use the default rates in `apps/server/src/budget.ts` ($3.00 per 1M input, $15.00 per 1M output by default)
   - Claude SDK sessions use a model-based pricing table (`computeModelCostUsd`) and SDK-reported usage when available.
+  - LiteLLM sessions use model-specific pricing from your LiteLLM proxy configuration.
 - If a budget is exceeded, the session is stopped automatically and `stop_reason` becomes `budget_exceeded`.
 
 > Note: USD cost is still an estimate unless you configure model pricing to match your account/contract.
@@ -375,3 +422,4 @@ COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server test
 - PTY sessions do not preserve stdout/stderr separation.
 - Token/cost is an estimate unless the CLI provides actual usage.
 - Some TUIs (notably Claude) may clear/restore the alternate screen on exit. The persisted replay is a faithful stream replay, so end-of-session scrollback may differ from what you remember seeing just before exit.
+- **No multi-line input in the terminal pane.** The xterm.js terminal forwards keystrokes directly to the PTY; the shell owns the line and executes on Enter. Shift+Enter, Ctrl+Enter, etc. all behave the same as plain Enter — there is no way to insert a newline without submitting at the terminal protocol level. Workarounds inside the shell: end a line with `\` for continuation, or use `$'line1\nline2'` quoting. Inside Claude Code's TUI specifically, `Option+Enter` inserts a newline in the prompt. For free-form multi-line composition, use the Claude (SDK) or LiteLLM chat tabs instead, where Shift+Enter works as expected.

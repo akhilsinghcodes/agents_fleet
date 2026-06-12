@@ -114,6 +114,34 @@ export function storeSessionArtifact(args: {
   } as const;
 }
 
+export function captureResumeArtifact(sessionId: string, command: string) {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT data FROM pty_chunks WHERE session_id = ? ORDER BY timestamp ASC",
+    )
+    .all(sessionId) as { data: string }[];
+
+  const fullText = rows.map((r) => r.data).join("");
+
+  // Strip ANSI escape sequences before matching.
+  // eslint-disable-next-line no-control-regex
+  const clean = fullText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+
+  const prefix = command === "codex" ? "codex" : "claude";
+  const pattern = command === "codex"
+    ? `codex\\s+resume\\s+([a-f0-9-]{36})`
+    : `claude\\s+--resume\\s+([a-f0-9-]{36})`;
+  const m = clean.match(new RegExp(pattern, "i"));
+  if (!m) return null;
+
+  const resumeCommand = command === "codex"
+    ? `codex resume ${m[1]}`
+    : `claude --resume ${m[1]}`;
+  storeSessionArtifact({ sessionId, kind: `${prefix}_resume`, content: resumeCommand });
+  return resumeCommand;
+}
+
 export function buildGitArtifactContent(snapshot: GitSnapshot): string {
   const payload: GitArtifactV1 = {
     v: 1,

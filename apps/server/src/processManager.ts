@@ -9,6 +9,7 @@ import type { SessionWsHub } from "./ws";
 import {
   buildGitArtifactContent,
   captureGitSnapshot,
+  captureResumeArtifact,
   storeSessionArtifact,
 } from "./gitArtifacts";
 
@@ -24,6 +25,12 @@ type RunningSession = {
   // PTY persistence buffering (avoid DB write per chunk)
   ptyBuffer: string;
   ptyFlushTimer: NodeJS.Timeout | null;
+
+  // Graceful-exit waiters: resolved when the pty onExit fires.
+  exitWaiters: Array<() => void>;
+
+  // Track whether the 80% budget warning has already been sent.
+  budgetWarning80Sent?: boolean;
 
   // Best-effort usage parsing for agent CLIs.
   // For Codex, usage lines report absolute totals; we overwrite session estimates from these.
@@ -583,6 +590,7 @@ export class ProcessManager {
       lastOutputAt: Date.now(),
       ptyBuffer: "",
       ptyFlushTimer: null,
+      exitWaiters: [],
     });
 
     void (async () => {
@@ -768,6 +776,12 @@ export class ProcessManager {
     });
 
     p.onExit(({ exitCode, signal }) => {
+      // Resolve any graceful-exit waiters before the async work below.
+      const r0 = this.running.get(args.sessionId);
+      if (r0) {
+        for (const resolve of r0.exitWaiters) resolve();
+        r0.exitWaiters = [];
+      }
       void (async () => {
         const current = await getSession(args.sessionId);
         const wasStopped = current?.status === "stopped";
@@ -779,8 +793,8 @@ export class ProcessManager {
         const message = `process exit: code=${exitCode ?? "null"} signal=${signal ?? "null"}`;
         // Flush any buffered PTY data before we record exit.
         this.flushPty(args.sessionId);
-        insertMarker(args.sessionId, "process_exit");
         insertPtyChunk(args.sessionId, `\r\n[system] ${message}\r\n`);
+        insertMarker(args.sessionId, "process_exit");
         const endedAt = current?.ended_at ?? nowIso();
         const updated = await updateSessionFields(args.sessionId, {
           status,
@@ -795,6 +809,12 @@ export class ProcessManager {
             args.repoPath,
             "git_on_exit",
           );
+        } catch {
+          // ignore
+        }
+        // Capture resume command from PTY output (best-effort).
+        try {
+          captureResumeArtifact(args.sessionId, args.command.trim());
         } catch {
           // ignore
         }
@@ -822,19 +842,21 @@ export class ProcessManager {
 
       // Capture git state when the user explicitly stops (best-effort).
       try {
-        captureGitArtifactBestEffort(
-          sessionId,
-          running.repoPath,
-          "git_on_stop",
-        );
+        captureGitArtifactBestEffort(sessionId, running.repoPath, "git_on_stop");
       } catch {
         // ignore
       }
 
-      try {
-        running.pty.kill();
-      } catch {
-        // ignore
+      if (running.command.trim() === "claude") {
+        await this.gracefullyExitClaude(running, sessionId);
+      } else if (running.command.trim() === "codex") {
+        await this.gracefullyExitCodex(running, sessionId);
+      } else {
+        try {
+          running.pty.kill();
+        } catch {
+          // ignore
+        }
       }
 
       return updated;
@@ -853,6 +875,82 @@ export class ProcessManager {
     });
     if (updated) this.hub.broadcastSession(updated);
     return updated;
+  }
+
+  private async gracefullyExitClaude(
+    running: RunningSession,
+    sessionId: string,
+  ) {
+    const GRACEFUL_TIMEOUT_MS = 5000;
+
+    const exitPromise = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, GRACEFUL_TIMEOUT_MS);
+      running.exitWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    // Interrupt any in-progress tool, then ask Claude to exit cleanly.
+    try {
+      running.pty.write("\x03");
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      running.pty.write("/exit\n");
+    } catch {
+      // ignore
+    }
+
+    await exitPromise;
+
+    // If the process hasn't exited yet, force-kill it.
+    if (this.running.has(sessionId)) {
+      try {
+        running.pty.kill();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private async gracefullyExitCodex(
+    running: RunningSession,
+    sessionId: string,
+  ) {
+    const GRACEFUL_TIMEOUT_MS = 5000;
+
+    const exitPromise = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, GRACEFUL_TIMEOUT_MS);
+      running.exitWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    try {
+      running.pty.write("\x03");
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      running.pty.write("/exit\n");
+    } catch {
+      // ignore
+    }
+
+    await exitPromise;
+
+    if (this.running.has(sessionId)) {
+      try {
+        running.pty.kill();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   writeInput(sessionId: string, data: string) {
@@ -914,6 +1012,40 @@ export class ProcessManager {
     if (session.status !== "running") return;
     const totalTokens =
       session.estimated_input_tokens + session.estimated_output_tokens;
+
+    // 80% warning — fire once per session, before hard stop.
+    const running = this.running.get(sessionId);
+    if (running && !running.budgetWarning80Sent) {
+      const tokenPct =
+        typeof session.budget_tokens === "number" && session.budget_tokens > 0
+          ? totalTokens / session.budget_tokens
+          : 0;
+      const usdPct =
+        typeof session.budget_usd === "number" && session.budget_usd > 0
+          ? session.estimated_cost_usd / session.budget_usd
+          : 0;
+
+      if (tokenPct >= 0.8 && tokenPct < 1) {
+        running.budgetWarning80Sent = true;
+        this.hub.broadcastBudgetWarning({
+          sessionId,
+          pctUsed: Math.round(tokenPct * 100),
+          kind: "tokens",
+          current: totalTokens,
+          budget: session.budget_tokens as number,
+        });
+      } else if (usdPct >= 0.8 && usdPct < 1) {
+        running.budgetWarning80Sent = true;
+        this.hub.broadcastBudgetWarning({
+          sessionId,
+          pctUsed: Math.round(usdPct * 100),
+          kind: "usd",
+          current: session.estimated_cost_usd,
+          budget: session.budget_usd as number,
+        });
+      }
+    }
+
     const tokenExceeded =
       typeof session.budget_tokens === "number" &&
       session.budget_tokens > 0 &&

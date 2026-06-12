@@ -1,30 +1,29 @@
-import type { IncomingMessage } from "node:http";
 import type {
-  Session,
-  WsClientMessage,
-  WsServerMessage,
+    Session,
+    WsClientMessage,
+    WsServerMessage,
 } from "@agents_fleet/shared";
+import type { IncomingMessage } from "node:http";
+import { WebSocket, WebSocketServer } from "ws";
+import { computeLiteLlmModelCostUsdAsync, computeModelCostUsdAsync } from "./budget";
 import {
-  assertClaudeSdkSession,
-  runClaudeSdkTurn,
-  storeClaudeSdkMessage,
-  storeClaudeSdkToolApproval,
-  storeClaudeSdkToolResult,
-  updateSessionEstimatesFromUsage,
-  loadClaudeSdkConfig,
+    assertClaudeSdkSession,
+    loadClaudeSdkConfig,
+    runClaudeSdkTurn,
+    storeClaudeSdkMessage,
+    storeClaudeSdkToolApproval,
+    storeClaudeSdkToolResult,
+    updateSessionEstimatesFromUsage,
 } from "./claudeSdk";
-import {
-  assertLiteLlmSession,
-  loadLiteLlmConfig,
-  runLiteLlmTurn,
-  storeLiteLlmMessage,
-  updateLiteLlmSessionEstimatesFromUsage,
-} from "./litellm";
-import { computeModelCostUsdAsync } from "./budget";
-import { computeLiteLlmModelCostUsdAsync } from "./budget";
-import { getDb } from "./db";
 import { runCommand } from "./commandRunner";
-import { WebSocketServer, WebSocket } from "ws";
+import { getDb } from "./db";
+import {
+    assertLiteLlmSession,
+    loadLiteLlmConfig,
+    runLiteLlmTurn,
+    storeLiteLlmMessage,
+    updateLiteLlmSessionEstimatesFromUsage,
+} from "./litellm";
 import type { ProcessManager } from "./processManager";
 
 function safeSend(ws: WebSocket, message: WsServerMessage) {
@@ -248,6 +247,8 @@ export class SessionWsHub {
       source: "client_rendered_statusline",
     });
   }
+
+
 
   private handleResize(
     ws: WebSocket,
@@ -789,6 +790,20 @@ export class SessionWsHub {
     if (!clients) return;
     for (const ws of clients) {
       safeSend(ws, { type: "session", session });
+    }
+  }
+
+  broadcastBudgetWarning(args: {
+    sessionId: string;
+    pctUsed: number;
+    kind: "usd" | "tokens";
+    current: number;
+    budget: number;
+  }) {
+    const clients = this.sessionToClients.get(args.sessionId);
+    if (!clients) return;
+    for (const ws of clients) {
+      safeSend(ws, { type: "budget_warning", ...args });
     }
   }
 }

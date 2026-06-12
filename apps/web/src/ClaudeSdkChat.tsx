@@ -90,11 +90,13 @@ export default function ClaudeSdkChat(props: Props) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const subscribedSessionRef = useRef<string | null>(null);
+  const startPromiseRef = useRef<Promise<Session> | null>(null);
   const activeStreamRef = useRef<{
     sessionId: string;
     assistantItemId: string;
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -292,7 +294,11 @@ export default function ClaudeSdkChat(props: Props) {
       throw new Error("repoPath is required");
     }
 
-    const created = await createClaudeSdkSession({
+    // Return in-flight promise if creation already started — prevents duplicate
+    // sessions when onFocus and onSend race.
+    if (startPromiseRef.current) return startPromiseRef.current;
+
+    startPromiseRef.current = createClaudeSdkSession({
       repoPath: repoPath.trim(),
       permissionMode: permissionMode as
         | "acceptEdits"
@@ -303,21 +309,16 @@ export default function ClaudeSdkChat(props: Props) {
         | "plan",
       model: model.trim().length > 0 ? model.trim() : undefined,
       budgetUsd: budgetUsd.trim().length > 0 ? Number(budgetUsd) : undefined,
+    }).then((created) => {
+      setSession(created);
+      setRepoPath(created.repo_path);
+      const ws = openClaudeWs();
+      void subscribeClaudeWs(ws, created.id);
+      props.onCreated(created);
+      return created;
     });
 
-    // Set immediately so the UI can show the session id / stats.
-    setSession(created);
-
-    // Also update the repoPath field to match the created session.
-    // (This avoids confusing placeholder values like "/path/to/repo" after creation.)
-    setRepoPath(created.repo_path);
-
-    // Ensure we're subscribed so streaming works immediately.
-    const ws = openClaudeWs();
-    void subscribeClaudeWs(ws, created.id);
-
-    props.onCreated(created);
-    return created;
+    return startPromiseRef.current;
   }
 
   async function ensureSessionReady() {
@@ -393,6 +394,7 @@ export default function ClaudeSdkChat(props: Props) {
 
     const text = input;
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
 
     let sessionId: string;
     try {
@@ -732,25 +734,33 @@ export default function ClaudeSdkChat(props: Props) {
         <div ref={messagesEndRef} />
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <textarea
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          rows={1}
+          onChange={(e) => {
+            setInput(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${e.target.scrollHeight}px`;
+          }}
           onFocus={() => {
-            // Create the session when the user is about to chat.
             void ensureSessionReady();
           }}
           onMouseDown={() => {
-            // Avoid requiring an extra click: if focusing via mouse, kick off session creation
-            // before focus so the first click still lands in the input.
             void ensureSessionReady();
           }}
-          placeholder={session ? "Write a message…" : "Write a message…"}
+          placeholder="Write a message…"
           style={{
             flex: 1,
             padding: "10px 12px",
             borderRadius: 12,
             border: "1px solid #d1d5db",
+            resize: "none",
+            overflow: "hidden",
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: 1.5,
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
