@@ -175,12 +175,10 @@ export default function TerminalReplay({
         // 3. Alt-screen entered AND exited → TUI session that ran to completion.
         //    Strip alt-screen sequences and cursor-home (ESC[H) so frames accumulate
         //    in the main scrollback buffer instead of overwriting from row 1.
-        const hasAltScreenEnter = allChunks.some((c) =>
-          /\x1b\[\??1049h/.test(c.data),
-        );
-        const hasAltScreenExit = allChunks.some((c) =>
-          /\x1b\[\??1049l/.test(c.data),
-        );
+        // eslint-disable-next-line no-control-regex
+        const hasAltScreenEnter = allChunks.some((c) => /\x1b\[\??1049h/.test(c.data));
+        // eslint-disable-next-line no-control-regex
+        const hasAltScreenExit = allChunks.some((c) => /\x1b\[\??1049l/.test(c.data));
 
         if (!hasAltScreenEnter) {
           // Case 1: plain output — write as-is
@@ -197,9 +195,8 @@ export default function TerminalReplay({
           // Case 3: exited TUI — strip alt-screen + cursor-home so frames
           // accumulate in scrollback rather than overwriting from row 1
           for (const c of allChunks) {
-            const sanitized = c.data
-              .replace(/\x1b\[\??(?:1049|47)[hl]/g, "")
-              .replace(/\x1b\[H/g, "");
+            // eslint-disable-next-line no-control-regex
+            const sanitized = c.data.replace(/\x1b\[\??(?:1049|47)[hl]/g, "").replace(/\x1b\[H/g, "");
             term.write(sanitized);
           }
         }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useContext, createContext } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   DashboardAlerts,
   DashboardCommandStat,
@@ -20,9 +20,6 @@ import {
 } from "./api";
 
 import {
-  createTheme,
-  ThemeProvider,
-  CssBaseline,
   Box,
   Typography,
   Button,
@@ -43,12 +40,8 @@ import {
   IconButton,
   Tooltip,
   Stack,
-  Divider,
   useTheme,
 } from "@mui/material";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import LightModeIcon from "@mui/icons-material/LightMode";
-import DarkModeIcon from "@mui/icons-material/DarkMode";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
@@ -64,9 +57,6 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-
-// Dashboard manages its own theme context independently from MainApp
-const ColorModeContext = createContext({ toggle: () => {} });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +180,6 @@ function StatCard({
   sub?: string;
   valueColor?: string;
 }) {
-  const theme = useTheme();
   return (
     <Box>
       <Typography
@@ -973,13 +962,6 @@ function DashboardHeader({
 
 // ── LiteLLM Spend Tab ─────────────────────────────────────────────────────────
 
-function fmtCost(n: number) { return `$${n.toFixed(4)}`; }
-function fmtNum(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
 function LiteLLMTab({
   from, to, preset, onPreset,
 }: {
@@ -1143,7 +1125,7 @@ function LiteLLMTab({
       {loading && <Box p={4} display="flex" justifyContent="center"><CircularProgress size={28} /></Box>}
 
       {data && !loading && <LiteLLMContent
-        chartData={chartData} modelRows={modelRows} dailyResults={dailyResults} totalSpend={totalSpend}
+        modelRows={modelRows} dailyResults={dailyResults} totalSpend={totalSpend}
       />}
     </>
   );
@@ -1151,8 +1133,7 @@ function LiteLLMTab({
 
 type LiteLLMDailyRow = { date: string; metrics: { spend: number; prompt_tokens: number; completion_tokens: number; api_requests: number; total_tokens: number } };
 
-function LiteLLMContent({ chartData, modelRows, dailyResults, totalSpend }: {
-  chartData: { date: string; spend: number }[];
+function LiteLLMContent({ modelRows, dailyResults, totalSpend }: {
   modelRows: [string, number][];
   dailyResults: LiteLLMDailyRow[];
   totalSpend: number;

@@ -11,7 +11,6 @@ import { openWs, type WsServerMessage } from "./ws";
 
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
 import {
     Alert,
@@ -29,7 +28,6 @@ import {
     ThemeProvider,
     Tooltip,
     Typography,
-    useTheme,
 } from "@mui/material";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -56,19 +54,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── Status dot (used in info bar only) ───────────────────────────────────────
-
-function StatusDot({ status }: { status: string }) {
-  const color =
-    status === "running"
-      ? "success.main"
-      : status === "error"
-      ? "error.main"
-      : "text.disabled";
-  return (
-    <FiberManualRecordIcon sx={{ fontSize: 9, color, flexShrink: 0 }} />
-  );
-}
 
 // ── Command type badge ────────────────────────────────────────────────────────
 
@@ -97,7 +82,6 @@ function SessionsSidebar({
   onSelect: (s: Session) => void;
   onDelete: (id: string) => void;
 }) {
-  const theme = useTheme();
   const visible = sessions.filter((s) => showAll || s.status === "running");
   const runningCount = sessions.filter((s) => s.status === "running").length;
 
