@@ -10,8 +10,18 @@ type ModelListFile = {
   }>;
 };
 
+type LiteLlmModelsResponse = {
+  data?: Array<{
+    id?: unknown;
+  }>;
+};
+
 type LiteLlmModelMessage =
-  | { role: "system" | "user" | "assistant"; content: string; tool_calls?: LiteLlmToolCall[] }
+  | {
+      role: "system" | "user" | "assistant";
+      content: string;
+      tool_calls?: LiteLlmToolCall[];
+    }
   | { role: "tool"; tool_call_id: string; content: string };
 
 type LiteLlmToolCall = {
@@ -64,14 +74,116 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-const MODEL_IDS = new Set(
-  ((modelsData as ModelListFile).data ?? [])
+/**
+ * Fetch available models from LITELLM_BASE_URL/models endpoint.
+ * Falls back to models.json if the API call fails.
+ */
+async function fetchAvailableModels(): Promise<Set<string>> {
+  const baseUrl = process.env.LITELLM_BASE_URL;
+  const apiKey = process.env.LITELLM_API_KEY;
+
+  console.log(
+    `[LiteLLM] Attempting to fetch models from LITELLM_BASE_URL=${baseUrl}`,
+  );
+
+  if (baseUrl && baseUrl.trim().length > 0) {
+    try {
+      const modelsUrl = new URL("/v1/models", baseUrl).toString();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      // Add authorization header if API key is available
+      if (apiKey && apiKey.trim().length > 0) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+        console.log(`[LiteLLM] Using API key for authorization`);
+      } else {
+        console.log(`[LiteLLM] No API key provided`);
+      }
+
+      console.log(`[LiteLLM] Fetching from: ${modelsUrl}`);
+      const response = await fetch(modelsUrl, {
+        method: "GET",
+        headers,
+      });
+
+      console.log(`[LiteLLM] Response status: ${response.status}`);
+
+      if (response.ok) {
+        const data = (await response.json()) as LiteLlmModelsResponse;
+        const modelIds = (data.data ?? [])
+          .map((item) => item.id)
+          .filter((id): id is string => typeof id === "string");
+
+        console.log(
+          `[LiteLLM] Parsed ${modelIds.length} models: ${modelIds.join(", ")}`,
+        );
+
+        if (modelIds.length > 0) {
+          console.log(
+            `[LiteLLM] ✓ Successfully loaded ${modelIds.length} models from ${modelsUrl}`,
+          );
+          return new Set(modelIds);
+        } else {
+          console.log(`[LiteLLM] API returned empty data array`);
+        }
+      } else {
+        const text = await response.text();
+        console.warn(
+          `[LiteLLM] API returned status ${response.status} from ${modelsUrl}. Response: ${text}`,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[LiteLLM] Failed to fetch models from LITELLM_BASE_URL: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      console.warn(error);
+    }
+  } else {
+    console.log(`[LiteLLM] LITELLM_BASE_URL not configured`);
+  }
+
+  // Fallback to models.json
+  const fallbackModels = ((modelsData as ModelListFile).data ?? [])
     .map((item) => item.id)
-    .filter((id): id is string => typeof id === "string"),
-);
+    .filter((id): id is string => typeof id === "string");
+  console.log(
+    `[LiteLLM] ✗ Using fallback models from models.json (${fallbackModels.length} models)`,
+  );
+  return new Set(fallbackModels);
+}
+
+let MODEL_IDS: Set<string> | null = null;
+
+/**
+ * Get the set of valid model IDs, fetching from LITELLM_BASE_URL if available.
+ * Cached after first call.
+ */
+export async function getValidModelIds(): Promise<Set<string>> {
+  if (MODEL_IDS === null) {
+    MODEL_IDS = await fetchAvailableModels();
+  }
+  return MODEL_IDS;
+}
+
+/**
+ * Get the set of valid model IDs synchronously from cache.
+ * If not yet cached, uses fallback to models.json.
+ */
+function getValidModelIdsSync(): Set<string> {
+  if (MODEL_IDS !== null) {
+    return MODEL_IDS;
+  }
+  // Fallback during initial startup before async fetch
+  return new Set(
+    ((modelsData as ModelListFile).data ?? [])
+      .map((item) => item.id)
+      .filter((id): id is string => typeof id === "string"),
+  );
+}
 
 export function isValidLiteLlmModel(model: string): boolean {
-  return MODEL_IDS.has(model);
+  return getValidModelIdsSync().has(model);
 }
 
 export function requireLiteLlmConfig(): { baseUrl: string; apiKey: string } {
@@ -198,7 +310,12 @@ export function updateLiteLlmSessionEstimatesFromUsage(
       estimated_output_tokens = ?,
       estimated_cost_usd = ?
      WHERE id = ?`,
-  ).run(usage.inputTokens, usage.outputTokens, usage.estimatedCostUsd, sessionId);
+  ).run(
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.estimatedCostUsd,
+    sessionId,
+  );
 }
 
 export function assertLiteLlmSession(sessionId: string): Session {
@@ -226,8 +343,7 @@ function usageFromNumbers(args: {
   outputTokens: number;
 }): Promise<LiteLlmUsageSnapshotV1> {
   return (async () => {
-    const estimatedCostUsd =
-      (await computeLiteLlmModelCostUsdAsync(args)) ?? 0;
+    const estimatedCostUsd = (await computeLiteLlmModelCostUsdAsync(args)) ?? 0;
     return {
       v: 1,
       inputTokens: args.inputTokens,
@@ -324,7 +440,11 @@ async function parseStreamResponse(args: {
         for (const dtc of deltaToolCalls) {
           const i = dtc.index ?? 0;
           if (!toolCallMap.has(i)) {
-            toolCallMap.set(i, { id: dtc.id ?? "", name: dtc.function?.name ?? "", arguments: "" });
+            toolCallMap.set(i, {
+              id: dtc.id ?? "",
+              name: dtc.function?.name ?? "",
+              arguments: "",
+            });
           }
           const tc = toolCallMap.get(i)!;
           if (dtc.id) tc.id = dtc.id;
@@ -411,7 +531,9 @@ async function callLiteLlm(args: {
     return {
       assistantText: parsed.assistantText,
       toolCalls: parsed.toolCalls,
-      usage: parsed.usage ? { ...parsed.usage, priceModelId: args.cfg.model } : null,
+      usage: parsed.usage
+        ? { ...parsed.usage, priceModelId: args.cfg.model }
+        : null,
     };
   }
 
@@ -420,10 +542,16 @@ async function callLiteLlm(args: {
   const text = parsed.choices?.[0]?.message?.content ?? "";
   if (text) args.onChunk?.(text);
   const msgToolCalls: LiteLlmToolCall[] =
-    (parsed.choices?.[0]?.message?.tool_calls as LiteLlmToolCall[] | undefined) ?? [];
+    (parsed.choices?.[0]?.message?.tool_calls as
+      | LiteLlmToolCall[]
+      | undefined) ?? [];
   const usageChunk = extractUsage(parsed);
   const usage = usageChunk
-    ? await usageFromNumbers({ model: args.cfg.model, inputTokens: usageChunk.promptTokens, outputTokens: usageChunk.completionTokens })
+    ? await usageFromNumbers({
+        model: args.cfg.model,
+        inputTokens: usageChunk.promptTokens,
+        outputTokens: usageChunk.completionTokens,
+      })
     : null;
   return { assistantText: text, toolCalls: msgToolCalls, usage };
 }
@@ -433,10 +561,13 @@ export async function runLiteLlmTurn(args: {
   userText: string;
   onChunk?: (text: string) => void;
   onUsage?: (usage: LiteLlmUsageSnapshotV1) => void;
-  onToolCall?: (toolCall: {
-    toolCallId: string;
-    command: string;
-  }) => Promise<{ stdout: string; stderr: string; exitCode: number; truncated: boolean; durationMs: number }>;
+  onToolCall?: (toolCall: { toolCallId: string; command: string }) => Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    truncated: boolean;
+    durationMs: number;
+  }>;
 }) {
   const cfg = loadLiteLlmConfig(args.sessionId);
   const { baseUrl, apiKey } = requireLiteLlmConfig();
@@ -451,7 +582,13 @@ export async function runLiteLlmTurn(args: {
   let totalUsage: LiteLlmUsageSnapshotV1 | null = null;
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const result = await callLiteLlm({ cfg, baseUrl, apiKey, messages, onChunk: args.onChunk });
+    const result = await callLiteLlm({
+      cfg,
+      baseUrl,
+      apiKey,
+      messages,
+      onChunk: args.onChunk,
+    });
 
     // Merge usage across turns.
     if (result.usage) {
@@ -478,23 +615,44 @@ export async function runLiteLlmTurn(args: {
     }
 
     // Append the assistant message with tool_calls to the in-memory history.
-    messages.push({ role: "assistant", content: result.assistantText, tool_calls: result.toolCalls });
+    messages.push({
+      role: "assistant",
+      content: result.assistantText,
+      tool_calls: result.toolCalls,
+    });
 
     // Execute each tool call and append results.
     for (const tc of result.toolCalls) {
       let command = "";
       try {
-        const fnArgs = JSON.parse(tc.function.arguments) as { command?: unknown };
-        command = typeof fnArgs.command === "string" ? fnArgs.command : tc.function.arguments;
+        const fnArgs = JSON.parse(tc.function.arguments) as {
+          command?: unknown;
+        };
+        command =
+          typeof fnArgs.command === "string"
+            ? fnArgs.command
+            : tc.function.arguments;
       } catch {
         command = tc.function.arguments;
       }
 
-      let toolResult: { stdout: string; stderr: string; exitCode: number; truncated: boolean; durationMs: number };
+      let toolResult: {
+        stdout: string;
+        stderr: string;
+        exitCode: number;
+        truncated: boolean;
+        durationMs: number;
+      };
       if (args.onToolCall) {
         toolResult = await args.onToolCall({ toolCallId: tc.id, command });
       } else {
-        toolResult = { stdout: "(tool execution not configured)", stderr: "", exitCode: 0, truncated: false, durationMs: 0 };
+        toolResult = {
+          stdout: "(tool execution not configured)",
+          stderr: "",
+          exitCode: 0,
+          truncated: false,
+          durationMs: 0,
+        };
       }
 
       const output = [

@@ -6,6 +6,7 @@ import { sessionsRouter } from "./routes/sessions";
 import { claudeSdkRouter } from "./routes/claudeSdk";
 import { liteLlmRouter } from "./routes/litellm";
 import { dashboardRouter } from "./routes/dashboard";
+import { getValidModelIds } from "./litellm";
 
 export type AgentsFleetServer = {
   app: Express;
@@ -15,6 +16,11 @@ export type AgentsFleetServer = {
 
 export function createApp(): AgentsFleetServer {
   bootstrapDb();
+
+  // Initialize model list from LITELLM_BASE_URL or fallback to models.json
+  getValidModelIds().catch((error) => {
+    console.error("Failed to initialize model list:", error);
+  });
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
