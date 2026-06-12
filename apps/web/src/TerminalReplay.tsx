@@ -22,6 +22,8 @@ type Props = {
   freezeAtExit?: boolean;
 };
 
+
+
 async function fetchMarkers(sessionId: string, signal?: AbortSignal) {
   const res = await fetch(
     `/api/sessions/${encodeURIComponent(sessionId)}/markers`,
@@ -33,6 +35,7 @@ async function fetchMarkers(sessionId: string, signal?: AbortSignal) {
 }
 
 function pickFreezeTimestamp(markers: Marker[]): string | null {
+
   // Prefer user-intent markers; otherwise fall back to stop/process exit.
   const priority = [
     "user_exit",
@@ -131,6 +134,8 @@ export default function TerminalReplay({
           ? pickFreezeTimestamp(await fetchMarkers(sessionId, ac.signal))
           : null;
 
+        // Buffer all chunks first so we can inspect them before writing.
+        const allChunks: Chunk[] = [];
         while (!cancelled) {
           const url = new URL(
             `/api/sessions/${encodeURIComponent(sessionId)}/pty?limit=${limit}&offset=${offset}`,
@@ -147,19 +152,56 @@ export default function TerminalReplay({
             offset: number;
           };
 
-          for (const c of json.chunks) {
-            // Strip alt-screen enter/exit so all output lands in the main
-            // scrollback buffer and the user can scroll through the full history.
-            const sanitized = c.data
-              .replaceAll("\u001b[?1049h", "")
-              .replaceAll("\u001b[?1049l", "")
-              .replaceAll("\u001b[?47h", "")
-              .replaceAll("\u001b[?47l", "");
-            term.write(sanitized);
-          }
-
+          allChunks.push(...json.chunks);
           if (json.chunks.length < limit) break;
           offset += limit;
+
+          // Yield to allow the browser to render and update the terminal
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        if (cancelled) return;
+
+        // Three-way replay strategy based on alt-screen usage in the data:
+        //
+        // 1. No alt-screen at all → plain shell/linear output. Write directly;
+        //    content accumulates in scrollback naturally.
+        //
+        // 2. Alt-screen entered but never exited → TUI session that was stopped
+        //    (the exit sequence is beyond the freeze timestamp). Force the replay
+        //    terminal into alt-screen before writing so the frozen TUI renders
+        //    exactly as it appeared at stop time.
+        //
+        // 3. Alt-screen entered AND exited → TUI session that ran to completion.
+        //    Strip alt-screen sequences and cursor-home (ESC[H) so frames accumulate
+        //    in the main scrollback buffer instead of overwriting from row 1.
+        const hasAltScreenEnter = allChunks.some((c) =>
+          /\x1b\[\??1049h/.test(c.data),
+        );
+        const hasAltScreenExit = allChunks.some((c) =>
+          /\x1b\[\??1049l/.test(c.data),
+        );
+
+        if (!hasAltScreenEnter) {
+          // Case 1: plain output — write as-is
+          for (const c of allChunks) {
+            term.write(c.data);
+          }
+        } else if (!hasAltScreenExit) {
+          // Case 2: stopped TUI — force alt-screen, replay as frozen snapshot
+          term.write("\x1b[?1049h");
+          for (const c of allChunks) {
+            term.write(c.data);
+          }
+        } else {
+          // Case 3: exited TUI — strip alt-screen + cursor-home so frames
+          // accumulate in scrollback rather than overwriting from row 1
+          for (const c of allChunks) {
+            const sanitized = c.data
+              .replace(/\x1b\[\??(?:1049|47)[hl]/g, "")
+              .replace(/\x1b\[H/g, "");
+            term.write(sanitized);
+          }
         }
 
         requestAnimationFrame(() => fit.fit());

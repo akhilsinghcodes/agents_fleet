@@ -345,3 +345,35 @@ export async function getDashboardAlerts(from: string, to: string): Promise<Dash
   if (isApiError(json)) throw new Error(json.error.message);
   return json as DashboardAlerts;
 }
+
+export type LiteLLMSpendResponse =
+  | { configured: false }
+  | { configured: true; spendLogs: LiteLLMSpendLog[]; activity: LiteLLMDailyActivity | null };
+
+// /spend/logs — one entry per day
+export type LiteLLMSpendLog = {
+  startTime?: string;
+  spend?: number;
+  models?: Record<string, number>; // model -> cost
+};
+
+// /user/daily/activity
+export type LiteLLMDailyActivity = {
+  results?: Array<{
+    date: string;
+    metrics: {
+      spend: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      api_requests: number;
+      total_tokens: number;
+    };
+  }>;
+};
+
+export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLMSpendResponse> {
+  const res = await fetch(`/api/dashboard/litellm/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const json = await parseJson<LiteLLMSpendResponse | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as LiteLLMSpendResponse;
+}

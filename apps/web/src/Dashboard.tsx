@@ -14,6 +14,9 @@ import {
   getDashboardByModel,
   getDashboardByRepo,
   getDashboardStats,
+  getLiteLLMSpend,
+  type LiteLLMSpendLog,
+  type LiteLLMDailyActivity,
 } from "./api";
 
 import {
@@ -40,6 +43,7 @@ import {
   IconButton,
   Tooltip,
   Stack,
+  Divider,
   useTheme,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -93,26 +97,21 @@ function shortPath(path: string) {
 function commandLabel(cmd: string) {
   if (cmd === "[claude-sdk]") return "Claude SDK";
   if (cmd === "[litellm-chat]") return "LiteLLM";
-  return cmd;
+  // Truncate long commands to 30 chars with ellipsis
+  return cmd.length > 30 ? cmd.slice(0, 30) + "..." : cmd;
 }
 
 function commandChipSx(cmd: string) {
-  if (cmd === "[claude-sdk]")
-    return { bgcolor: "#ede9fe", color: "#6d28d9", border: "none" };
-  if (cmd === "[litellm-chat]")
-    return { bgcolor: "#ccfbf1", color: "#0f766e", border: "none" };
+  if (cmd === "[claude-sdk]") return { bgcolor: "#ede9fe", color: "#6d28d9", border: "none" };
+  if (cmd === "[litellm-chat]") return { bgcolor: "#ccfbf1", color: "#0f766e", border: "none" };
   return { bgcolor: "#e2e8f0", color: "#334155", border: "none" };
 }
 
 function statusChipSx(status: string) {
-  if (status === "running")
-    return { bgcolor: "#dcfce7", color: "#15803d", border: "none" };
-  if (status === "exited")
-    return { bgcolor: "#fef3c7", color: "#b45309", border: "none" };
-  if (status === "stopped")
-    return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
-  if (status === "error")
-    return { bgcolor: "#fee2e2", color: "#dc2626", border: "none" };
+  if (status === "running")  return { bgcolor: "#dcfce7", color: "#15803d", border: "none" };
+  if (status === "exited")   return { bgcolor: "#fef3c7", color: "#b45309", border: "none" };
+  if (status === "stopped")  return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
+  if (status === "error")    return { bgcolor: "#fee2e2", color: "#dc2626", border: "none" };
   return { bgcolor: "#f1f5f9", color: "#475569", border: "none" };
 }
 
@@ -191,6 +190,7 @@ function StatCard({
   sub?: string;
   valueColor?: string;
 }) {
+  const theme = useTheme();
   return (
     <Box>
       <Typography
@@ -206,11 +206,7 @@ function StatCard({
       </Typography>
       <Typography
         variant="h5"
-        sx={{
-          fontWeight: 700,
-          lineHeight: 1.2,
-          color: valueColor ?? "text.primary",
-        }}
+        sx={{ fontWeight: 700, lineHeight: 1.2, color: valueColor ?? "text.primary" }}
       >
         {value}
       </Typography>
@@ -267,50 +263,28 @@ function SessionsTable({ sessions }: { sessions: DashboardSession[] }) {
               <Chip
                 label={commandLabel(s.command)}
                 size="small"
-                sx={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  ...commandChipSx(s.command),
-                }}
+                sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(s.command) }}
               />
             </TableCell>
             <TableCell>
               <Chip
                 label={s.status}
                 size="small"
-                sx={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  ...statusChipSx(s.status),
-                }}
+                sx={{ fontSize: 11, fontWeight: 700, ...statusChipSx(s.status) }}
               />
               {s.stop_reason && s.stop_reason !== "process_exit" && (
-                <Typography
-                  component="span"
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ ml: 0.5 }}
-                >
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
                   ({s.stop_reason})
                 </Typography>
               )}
             </TableCell>
-            <TableCell
-              align="right"
-              sx={{ fontVariantNumeric: "tabular-nums" }}
-            >
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
               {fmtTokens(s.estimated_input_tokens)}
             </TableCell>
-            <TableCell
-              align="right"
-              sx={{ fontVariantNumeric: "tabular-nums" }}
-            >
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
               {fmtTokens(s.estimated_output_tokens)}
             </TableCell>
-            <TableCell
-              align="right"
-              sx={{ fontVariantNumeric: "tabular-nums" }}
-            >
+            <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
               ${fmt(s.estimated_cost_usd, 4)}
             </TableCell>
             <TableCell align="right">
@@ -328,16 +302,9 @@ function SessionsTable({ sessions }: { sessions: DashboardSession[] }) {
 
 // ── By Repo Tab ───────────────────────────────────────────────────────────────
 
-function RepoRow({
-  repo,
-  totalCost,
-}: {
-  repo: DashboardRepo;
-  totalCost: number;
-}) {
+function RepoRow({ repo, totalCost }: { repo: DashboardRepo; totalCost: number }) {
   const [expanded, setExpanded] = useState(false);
-  const pct =
-    totalCost > 0 ? Math.round((repo.stats.total_cost / totalCost) * 100) : 0;
+  const pct = totalCost > 0 ? Math.round((repo.stats.total_cost / totalCost) * 100) : 0;
   const theme = useTheme();
 
   return (
@@ -345,10 +312,7 @@ function RepoRow({
       <TableRow
         hover
         onClick={() => setExpanded((v) => !v)}
-        sx={{
-          cursor: "pointer",
-          "& > td": { borderBottom: expanded ? "none" : undefined },
-        }}
+        sx={{ cursor: "pointer", "& > td": { borderBottom: expanded ? "none" : undefined } }}
       >
         <TableCell>
           <Box display="flex" alignItems="center" gap={0.5}>
@@ -362,22 +326,14 @@ function RepoRow({
             <Typography fontWeight={600} fontSize={13}>
               {shortPath(repo.repo_path)}
             </Typography>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ ml: 0.5 }}
-            >
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
               {repo.repo_path}
             </Typography>
           </Box>
         </TableCell>
         <TableCell align="right">{repo.stats.session_count}</TableCell>
-        <TableCell align="right">
-          {fmtTokens(repo.stats.total_input_tokens)}
-        </TableCell>
-        <TableCell align="right">
-          {fmtTokens(repo.stats.total_output_tokens)}
-        </TableCell>
+        <TableCell align="right">{fmtTokens(repo.stats.total_input_tokens)}</TableCell>
+        <TableCell align="right">{fmtTokens(repo.stats.total_output_tokens)}</TableCell>
         <TableCell align="right">
           <Typography fontWeight={700} fontSize={13}>
             ${fmt(repo.stats.total_cost)}
@@ -534,46 +490,28 @@ function ByCommandTab({ commands }: { commands: DashboardCommandStat[] }) {
         </TableHead>
         <TableBody>
           {sorted.map((c) => {
-            const pct =
-              totalCost > 0 ? Math.round((c.total_cost / totalCost) * 100) : 0;
+            const pct = totalCost > 0 ? Math.round((c.total_cost / totalCost) * 100) : 0;
             return (
               <TableRow key={c.command} hover>
                 <TableCell>
                   <Chip
                     label={commandLabel(c.command)}
                     size="small"
-                    sx={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      ...commandChipSx(c.command),
-                    }}
+                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(c.command) }}
                   />
                 </TableCell>
                 <TableCell align="right">{c.session_count}</TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(c.avg_cost, 4)}
                 </TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(c.min_cost, 4)}
                 </TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(c.max_cost, 4)}
                 </TableCell>
-                <TableCell align="right">
-                  {fmtTokens(c.total_input_tokens)}
-                </TableCell>
-                <TableCell align="right">
-                  {fmtTokens(c.total_output_tokens)}
-                </TableCell>
+                <TableCell align="right">{fmtTokens(c.total_input_tokens)}</TableCell>
+                <TableCell align="right">{fmtTokens(c.total_output_tokens)}</TableCell>
                 <TableCell align="right">
                   <Typography fontWeight={700} fontSize={13}>
                     ${fmt(c.total_cost)}
@@ -656,12 +594,9 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
         </TableHead>
         <TableBody>
           {sorted.map((m) => {
-            const pct =
-              totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
+            const pct = totalCost > 0 ? Math.round((m.total_cost / totalCost) * 100) : 0;
             const outputPerDollar =
-              m.total_cost > 0
-                ? Math.round(m.total_output_tokens / m.total_cost)
-                : null;
+              m.total_cost > 0 ? Math.round(m.total_output_tokens / m.total_cost) : null;
             return (
               <TableRow key={`${m.model}-${m.command}`} hover>
                 <TableCell>
@@ -669,11 +604,7 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
                     {m.model}
                   </Typography>
                   {outputPerDollar !== null && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      display="block"
-                    >
+                    <Typography variant="caption" color="text.secondary" display="block">
                       {fmtTokens(outputPerDollar)} output tokens / $1
                     </Typography>
                   )}
@@ -682,38 +613,21 @@ function ByModelTab({ models }: { models: DashboardModelStat[] }) {
                   <Chip
                     label={commandLabel(m.command)}
                     size="small"
-                    sx={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      ...commandChipSx(m.command),
-                    }}
+                    sx={{ fontSize: 11, fontWeight: 700, ...commandChipSx(m.command) }}
                   />
                 </TableCell>
                 <TableCell align="right">{m.session_count}</TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(m.avg_cost, 4)}
                 </TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(m.min_cost, 4)}
                 </TableCell>
-                <TableCell
-                  align="right"
-                  sx={{ fontVariantNumeric: "tabular-nums" }}
-                >
+                <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                   ${fmt(m.max_cost, 4)}
                 </TableCell>
-                <TableCell align="right">
-                  {fmtTokens(m.total_input_tokens)}
-                </TableCell>
-                <TableCell align="right">
-                  {fmtTokens(m.total_output_tokens)}
-                </TableCell>
+                <TableCell align="right">{fmtTokens(m.total_input_tokens)}</TableCell>
+                <TableCell align="right">{fmtTokens(m.total_output_tokens)}</TableCell>
                 <TableCell align="right">
                   <Typography fontWeight={700} fontSize={13}>
                     ${fmt(m.total_cost)}
@@ -783,11 +697,14 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
               ${fmt(week.spend)}
             </Typography>
             <Typography component="span" color="text.secondary">
-              {" "}
-              / ${fmt(week.budget)}
+              {" "}/ ${fmt(week.budget)}
             </Typography>
           </Typography>
-          <Typography fontSize={13} fontWeight={600} color={`${pctColor}.main`}>
+          <Typography
+            fontSize={13}
+            fontWeight={600}
+            color={`${pctColor}.main`}
+          >
             {week.percent}%
           </Typography>
         </Box>
@@ -803,11 +720,7 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
       <Stack direction="row" gap={4}>
         {(
           [
-            {
-              label: "Avg / day",
-              value: `$${fmt(week.daily_average)}`,
-              alert: false,
-            },
+            { label: "Avg / day", value: `$${fmt(week.daily_average)}`, alert: false },
             {
               label: "Projected",
               value: `$${fmt(week.projected_week_end)}`,
@@ -821,11 +734,7 @@ function WeeklyBudgetStrip({ data }: { data: DashboardAlerts }) {
           ] as { label: string; value: string; alert: boolean }[]
         ).map(({ label, value, alert }) => (
           <Box key={label} textAlign="right">
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-            >
+            <Typography variant="caption" color="text.secondary" display="block">
               {label}
             </Typography>
             <Typography
@@ -876,8 +785,8 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
     week.daily_average > 0
       ? week.daily_average
       : week.days_elapsed > 0
-        ? week.spend / week.days_elapsed
-        : 0;
+      ? week.spend / week.days_elapsed
+      : 0;
 
   const chartData = daily_spend.map((d: DashboardDaySpend) => ({
     ...d,
@@ -888,22 +797,13 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
 
   function barFill(d: DashboardDaySpend) {
     if (d.isFuture) return theme.palette.action.disabledBackground;
-    if (d.isToday)
-      return week.will_exceed
-        ? theme.palette.error.main
-        : theme.palette.primary.main;
-    return week.will_exceed
-      ? theme.palette.error.light
-      : theme.palette.primary.light;
+    if (d.isToday) return week.will_exceed ? theme.palette.error.main : theme.palette.primary.main;
+    return week.will_exceed ? theme.palette.error.light : theme.palette.primary.light;
   }
 
   return (
     <ResponsiveContainer width="100%" height={110}>
-      <BarChart
-        data={chartData}
-        barCategoryGap="20%"
-        margin={{ top: 20, right: 8, bottom: 0, left: 0 }}
-      >
+      <BarChart data={chartData} barCategoryGap="20%" margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
         <XAxis
           dataKey="label"
           tick={{ fontSize: 11, fill: theme.palette.text.secondary }}
@@ -912,10 +812,7 @@ function WeeklySpendChart({ data }: { data: DashboardAlerts }) {
         />
         <YAxis hide />
         <RechartsTooltip
-          formatter={(value: number) => [
-            `$${(value as number).toFixed(4)}`,
-            "Spend",
-          ]}
+          formatter={(value: number) => [`$${(value as number).toFixed(4)}`, "Spend"]}
           contentStyle={{
             background: theme.palette.background.paper,
             border: `1px solid ${theme.palette.divider}`,
@@ -981,8 +878,7 @@ function DashboardHeader({
         </Typography>
         {stats && (
           <Typography variant="body2" color="text.secondary">
-            {new Date(from).toLocaleDateString()} –{" "}
-            {new Date(to).toLocaleDateString()}
+            {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
           </Typography>
         )}
       </Box>
@@ -1040,22 +936,10 @@ function DashboardHeader({
       {/* Stats row */}
       {stats && (
         <Stack direction="row" gap={4} flexWrap="wrap">
-          <StatCard
-            label="Total Spend"
-            value={`$${fmt(stats.totals.total_cost)}`}
-          />
-          <StatCard
-            label="Sessions"
-            value={String(stats.totals.total_sessions)}
-          />
-          <StatCard
-            label="Input Tokens"
-            value={fmtTokens(stats.totals.total_input_tokens)}
-          />
-          <StatCard
-            label="Output Tokens"
-            value={fmtTokens(stats.totals.total_output_tokens)}
-          />
+          <StatCard label="Total Spend" value={`$${fmt(stats.totals.total_cost)}`} />
+          <StatCard label="Sessions" value={String(stats.totals.total_sessions)} />
+          <StatCard label="Input Tokens" value={fmtTokens(stats.totals.total_input_tokens)} />
+          <StatCard label="Output Tokens" value={fmtTokens(stats.totals.total_output_tokens)} />
           {stats.totals.period_budget > 0 && (
             <StatCard
               label="Budget Used"
@@ -1064,19 +948,22 @@ function DashboardHeader({
                 stats.totals.budget_percent >= 90
                   ? "error.main"
                   : stats.totals.budget_percent >= 70
-                    ? "warning.main"
-                    : "success.main"
+                  ? "warning.main"
+                  : "success.main"
               }
               sub={`$${fmt(stats.totals.total_cost)} / $${fmt(stats.totals.period_budget)}`}
             />
           )}
           {stats.by_command.slice(0, 4).map((c) => (
-            <StatCard
-              key={c.command}
-              label={commandLabel(c.command)}
-              value={`$${fmt(c.total_cost)}`}
-              sub={`${c.session_count} sessions`}
-            />
+            <Tooltip key={c.command} title={c.command} enterDelay={500}>
+              <div>
+                <StatCard
+                  label={commandLabel(c.command)}
+                  value={`$${fmt(c.total_cost)}`}
+                  sub={`${c.session_count} sessions`}
+                />
+              </div>
+            </Tooltip>
           ))}
         </Stack>
       )}
@@ -1084,24 +971,303 @@ function DashboardHeader({
   );
 }
 
+// ── LiteLLM Spend Tab ─────────────────────────────────────────────────────────
+
+function fmtCost(n: number) { return `$${n.toFixed(4)}`; }
+function fmtNum(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function LiteLLMTab({
+  from, to, preset, onPreset,
+}: {
+  from: string; to: string;
+  preset: Preset; onPreset: (p: Preset) => void;
+}) {
+  const [data, setData] = useState<{ spendLogs: LiteLLMSpendLog[]; activity: LiteLLMDailyActivity | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getLiteLLMSpend(from, to)
+      .then((res) => {
+        if (!res.configured) { setNotConfigured(true); return; }
+        setNotConfigured(false);
+        setData({ spendLogs: res.spendLogs, activity: res.activity });
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  type DailyResult = NonNullable<LiteLLMDailyActivity["results"]>[number];
+
+  const dailyResults: DailyResult[] = data?.activity?.results ?? [];
+  const totalSpend = dailyResults.reduce((s, r) => s + r.metrics.spend, 0);
+  const totalRequests = dailyResults.reduce((s, r) => s + r.metrics.api_requests, 0);
+  const totalPrompt = dailyResults.reduce((s, r) => s + r.metrics.prompt_tokens, 0);
+  const totalCompletion = dailyResults.reduce((s, r) => s + r.metrics.completion_tokens, 0);
+
+  const byModel = new Map<string, number>();
+  for (const log of data?.spendLogs ?? []) {
+    for (const [model, cost] of Object.entries(log.models ?? {})) {
+      byModel.set(model, (byModel.get(model) ?? 0) + cost);
+    }
+  }
+  const modelRows = [...byModel.entries()].sort((a, b) => b[1] - a[1]);
+  const chartData = [...dailyResults].sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({ date: r.date, spend: r.metrics.spend }));
+
+  const presets: { key: Preset; label: string }[] = [
+    { key: "today", label: "Today" },
+    { key: "week", label: "7 Days" },
+    { key: "month", label: "Month" },
+    { key: "ytd", label: "YTD" },
+  ];
+
+  return (
+    <>
+      {/* Header Paper — identical structure to Agents Fleet DashboardHeader */}
+      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "stretch" }}>
+          <Box p={3}>
+            <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+              <Typography variant="h6" fontWeight={700}>Spend Analytics</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
+              </Typography>
+            </Box>
+            <Box display="flex" alignItems="center" gap={1} mb={2}>
+              <ButtonGroup size="small" variant="outlined">
+                {presets.map((p) => (
+                  <Button key={p.key} variant={preset === p.key ? "contained" : "outlined"}
+                    disableElevation onClick={() => onPreset(p.key)}>{p.label}</Button>
+                ))}
+              </ButtonGroup>
+            </Box>
+            {data && (
+              <Stack direction="row" gap={4} flexWrap="wrap">
+                <StatCard label="Total Spend" value={`$${fmt(totalSpend)}`} />
+                <StatCard label="Requests" value={fmtTokens(totalRequests)} />
+                <StatCard label="Prompt Tokens" value={fmtTokens(totalPrompt)} />
+                <StatCard label="Completion Tokens" value={fmtTokens(totalCompletion)} />
+              </Stack>
+            )}
+          </Box>
+          {/* THIS WEEK chart — same position as Agents Fleet */}
+          {chartData.length > 0 && (
+            <Box sx={{ borderLeft: 1, borderColor: "divider", p: 2 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary"
+                textTransform="uppercase" letterSpacing="0.07em" display="block" mb={1}>
+                This Week
+              </Typography>
+              <ResponsiveContainer width="100%" height={110}>
+                <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="20%">
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => {
+                    const d = new Date(v); return d.toLocaleDateString("en-US", { weekday: "short" });
+                  }} axisLine={false} tickLine={false} />
+                  <YAxis hide />
+                  <RechartsTooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Spend"]}
+                    labelFormatter={(l: string) => new Date(l).toLocaleDateString()} />
+                  <Bar dataKey="spend" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Weekly Budget strip — computed from LiteLLM daily data */}
+      {data && dailyResults.length > 0 && (() => {
+        const WEEKLY_BUDGET = 200;
+        const now = new Date();
+        // Week starts Sunday (getDay() === 0)
+        const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+        const daysElapsed = Math.min(7, Math.max(1, Math.floor((now.getTime() - weekStart.getTime()) / 86400000) + 1));
+        const weekSpend = dailyResults.filter(r => r.date >= weekStart.toISOString().slice(0,10) && r.date <= weekEnd.toISOString().slice(0,10))
+          .reduce((s, r) => s + r.metrics.spend, 0);
+        const dailyAvg = weekSpend / daysElapsed;
+        const projected = dailyAvg * 7;
+        const pct = Math.round((weekSpend / WEEKLY_BUDGET) * 100);
+        const willExceed = projected > WEEKLY_BUDGET;
+        const pctColor: "error" | "warning" | "primary" = pct >= 90 ? "error" : pct >= 70 ? "warning" : "primary";
+        return (
+          <Paper variant="outlined" sx={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto",
+            alignItems: "center", gap: 3.5, px: 3, py: 2, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
+            <Box>
+              <Typography fontWeight={600} fontSize={13}>Weekly Budget</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {daysElapsed} of 7 days · {weekStart.toISOString().slice(0,10)} – {weekEnd.toISOString().slice(0,10)}
+              </Typography>
+            </Box>
+            <Box>
+              <Box display="flex" justifyContent="space-between" mb={0.75}>
+                <Typography fontSize={13}>
+                  <Typography component="span" fontWeight={700}>${fmt(weekSpend)}</Typography>
+                  <Typography component="span" color="text.secondary"> / ${fmt(WEEKLY_BUDGET)}</Typography>
+                </Typography>
+                <Typography fontSize={13} fontWeight={600} color={`${pctColor}.main`}>{pct}%</Typography>
+              </Box>
+              <LinearProgress variant="determinate" value={Math.min(100, pct)} color={pctColor} sx={{ height: 8, borderRadius: 4 }} />
+            </Box>
+            <Stack direction="row" gap={4}>
+              {[
+                { label: "Avg / day", value: `$${fmt(dailyAvg)}`, alert: false },
+                { label: "Projected", value: `$${fmt(projected)}`, alert: willExceed },
+                { label: "Remaining", value: `$${fmt(Math.max(0, WEEKLY_BUDGET - weekSpend))}`, alert: false },
+              ].map(({ label, value, alert }) => (
+                <Box key={label} textAlign="right">
+                  <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                  <Typography fontSize={18} fontWeight={700} color={alert ? "error.main" : "text.primary"} lineHeight={1.3}>{value}</Typography>
+                </Box>
+              ))}
+            </Stack>
+            <Chip icon={willExceed ? <WarningAmberIcon fontSize="small" /> : <CheckCircleOutlineIcon fontSize="small" />}
+              label={willExceed ? "Over budget" : "On track"} color={willExceed ? "error" : "success"}
+              variant="outlined" sx={{ fontWeight: 600 }} />
+          </Paper>
+        );
+      })()}
+
+      {notConfigured && (
+        <Alert severity="info" sx={{ m: 2 }}>
+          LiteLLM is not configured. Set <code>LITELLM_BASE_URL</code> and <code>LITELLM_API_KEY</code> to enable spend tracking.
+        </Alert>
+      )}
+      {error && <Alert severity="error" sx={{ m: 2 }}>{error}</Alert>}
+      {loading && <Box p={4} display="flex" justifyContent="center"><CircularProgress size={28} /></Box>}
+
+      {data && !loading && <LiteLLMContent
+        chartData={chartData} modelRows={modelRows} dailyResults={dailyResults} totalSpend={totalSpend}
+      />}
+    </>
+  );
+}
+
+type LiteLLMDailyRow = { date: string; metrics: { spend: number; prompt_tokens: number; completion_tokens: number; api_requests: number; total_tokens: number } };
+
+function LiteLLMContent({ chartData, modelRows, dailyResults, totalSpend }: {
+  chartData: { date: string; spend: number }[];
+  modelRows: [string, number][];
+  dailyResults: LiteLLMDailyRow[];
+  totalSpend: number;
+}) {
+  const [tab, setTab] = useState<"by_model" | "daily">("by_model");
+  const tabs = [{ key: "by_model" as const, label: "By Model" }, { key: "daily" as const, label: "Daily" }];
+
+  return (
+    <>
+      {/* Tab bar — same style as Agents Fleet */}
+      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0, px: 2, display: "flex", gap: 0 }}>
+        {tabs.map(({ key, label }) => (
+          <Button key={key} size="small" onClick={() => setTab(key)} disableRipple sx={{
+            borderRadius: 0, px: 2, py: 1.5,
+            fontWeight: tab === key ? 700 : 400,
+            color: tab === key ? "primary.main" : "text.secondary",
+            borderBottom: 2,
+            borderColor: tab === key ? "primary.main" : "transparent",
+            textTransform: "none", fontSize: 13,
+            "&:hover": { bgcolor: "action.hover" },
+          }}>{label}</Button>
+        ))}
+      </Paper>
+
+      {/* Content */}
+      <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+        <Paper variant="outlined" sx={{ minHeight: "100%", borderRadius: 2, overflow: "hidden" }}>
+
+          {tab === "by_model" && (
+            <Box p={2}>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Model</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>% of Total</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {modelRows.map(([model, spend]) => (
+                      <TableRow key={model} hover>
+                        <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{model || "—"}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: 12 }}>${fmt(spend, 4)}</TableCell>
+                        <TableCell align="right">
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, justifyContent: "flex-end" }}>
+                            <LinearProgress variant="determinate"
+                              value={totalSpend > 0 ? Math.min((spend / totalSpend) * 100, 100) : 0}
+                              sx={{ width: 60, height: 6, borderRadius: 3 }} />
+                            <Typography variant="caption" sx={{ minWidth: 28, textAlign: "right" }}>
+                              {totalSpend > 0 ? Math.round((spend / totalSpend) * 100) : 0}%
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+
+          {tab === "daily" && (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Requests</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Prompt Tokens</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Completion Tokens</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {[...dailyResults].sort((a, b) => b.date.localeCompare(a.date)).map((r) => (
+                    <TableRow key={r.date} hover>
+                      <TableCell sx={{ fontSize: 12 }}>{r.date}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.api_requests)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.prompt_tokens)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.completion_tokens)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12, fontWeight: 600 }}>${fmt(r.metrics.spend, 4)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+
+          {dailyResults.length === 0 && (
+            <Box p={3}><Typography color="text.secondary" fontSize={13}>No spend data found for this period.</Typography></Box>
+          )}
+        </Paper>
+      </Box>
+    </>
+  );
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 type DashTab = "by_repo" | "by_command" | "by_model";
 
-function DashboardInner({ onBack }: { onBack: () => void }) {
-  const colorMode = useContext(ColorModeContext);
-  const theme = useTheme();
 
-  const [preset, setPreset] = useState<Preset>("month");
+export function DashboardContent() {
+  const [mainTab, setMainTab] = useState<"agents_fleet" | "litellm">("agents_fleet");
+  const [tab, setTab] = useState<DashTab>("by_repo");
+  const [preset, setPreset] = useState<Preset>("week");
   const [customFrom, setCustomFrom] = useState(() => toDateStr(new Date()));
   const [customTo, setCustomTo] = useState(() => toDateStr(new Date()));
 
-  const { from, to } =
-    preset === "custom"
-      ? { from: customFrom, to: customTo }
-      : presetRange(preset);
+  const { from, to } = useMemo(() => {
+    if (preset === "custom") return { from: customFrom, to: customTo };
+    return presetRange(preset);
+  }, [preset, customFrom, customTo]);
 
-  const [tab, setTab] = useState<DashTab>("by_repo");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [repos, setRepos] = useState<DashboardRepo[]>([]);
   const [commands, setCommands] = useState<DashboardCommandStat[]>([]);
@@ -1111,25 +1277,17 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!from || !to) return;
     setLoading(true);
     setError(null);
 
     Promise.all([
-      getDashboardStats(from, to),
-      getDashboardByRepo(from, to),
-      getDashboardByCommand(from, to),
-      getDashboardByModel(from, to),
-      getDashboardAlerts(from, to),
+      getDashboardStats(from, to).then((s) => setStats(s)),
+      getDashboardByRepo(from, to).then((r) => setRepos(r.repos)),
+      getDashboardByCommand(from, to).then((c) => setCommands(c.commands)),
+      getDashboardByModel(from, to).then((m) => setModels(m.models)),
+      getDashboardAlerts(from, to).then((a) => setAlerts(a)),
     ])
-      .then(([s, r, c, m, a]) => {
-        setStats(s);
-        setRepos(r.repos);
-        setCommands(c.commands);
-        setModels(m.models);
-        setAlerts(a);
-      })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [from, to]);
 
@@ -1142,52 +1300,51 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
   return (
     <Box
       sx={{
-        height: "100vh",
         display: "flex",
         flexDirection: "column",
-        bgcolor: "background.default",
+        flex: 1,
         overflow: "hidden",
       }}
     >
-      {/* Top nav bar */}
-      <Paper
-        elevation={0}
-        sx={{
-          borderBottom: 1,
-          borderColor: "divider",
-          borderRadius: 0,
-          px: 3,
-          py: 1,
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-        }}
-      >
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={onBack}
-          size="small"
-          color="inherit"
-          sx={{ textTransform: "none", color: "text.secondary" }}
-        >
-          Back to sessions
-        </Button>
-        <Box flex={1} />
-        <Tooltip
-          title={`Switch to ${theme.palette.mode === "dark" ? "light" : "dark"} mode`}
-        >
-          <IconButton onClick={colorMode.toggle} size="small">
-            {theme.palette.mode === "dark" ? (
-              <LightModeIcon fontSize="small" />
-            ) : (
-              <DarkModeIcon fontSize="small" />
-            )}
-          </IconButton>
-        </Tooltip>
-      </Paper>
+      {/* Main tab: Agents Fleet / LiteLLM */}
+      <Box sx={{ display: "flex", gap: 0, borderBottom: 1, borderColor: "divider", px: 2 }}>
+        {(["agents_fleet", "litellm"] as const).map((key) => (
+          <Button
+            key={key}
+            size="small"
+            onClick={() => setMainTab(key)}
+            sx={{
+              borderRadius: 0,
+              px: 2,
+              py: 1,
+              fontWeight: mainTab === key ? 700 : 400,
+              color: mainTab === key ? "primary.main" : "text.secondary",
+              borderBottom: mainTab === key ? 2 : 2,
+              borderColor: mainTab === key ? "primary.main" : "transparent",
+              textTransform: "none",
+              fontSize: 13,
+            }}
+          >
+            {key === "agents_fleet" ? "Agents Fleet" : "LiteLLM"}
+          </Button>
+        ))}
+      </Box>
 
-      {/* Header: metrics (left) + weekly chart (right) */}
-      <Paper
+      {mainTab === "litellm" && (
+        <Box sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+          <LiteLLMTab
+            from={from} to={to}
+            preset={preset}
+            onPreset={(p) => {
+              setPreset(p);
+              if (p !== "custom") { const r = presetRange(p); setCustomFrom(r.from); setCustomTo(r.to); }
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Header: metrics (left) + weekly chart (right) — Agents Fleet only */}
+      {mainTab === "agents_fleet" && <><Paper
         elevation={0}
         sx={{
           borderBottom: 1,
@@ -1235,7 +1392,7 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
       {/* Budget strip */}
       {alerts && <WeeklyBudgetStrip data={alerts} />}
 
-      {/* Tab bar */}
+      {/* Tab bar + content */}
       <Paper
         elevation={0}
         sx={{
@@ -1292,71 +1449,17 @@ function DashboardInner({ onBack }: { onBack: () => void }) {
               {error}
             </Alert>
           )}
-          {!loading && !error && tab === "by_repo" && (
-            <ByRepoTab repos={repos} />
-          )}
+          {!loading && !error && tab === "by_repo" && <ByRepoTab repos={repos} />}
           {!loading && !error && tab === "by_command" && (
             <ByCommandTab commands={commands} />
           )}
-          {!loading && !error && tab === "by_model" && (
-            <ByModelTab models={models} />
-          )}
+          {!loading && !error && tab === "by_model" && <ByModelTab models={models} />}
         </Paper>
       </Box>
-    </Box>
-  );
+      </>}
+    </Box>  );
 }
 
-// ── Root with its own ThemeProvider + toggle ──────────────────────────────────
-
-export default function Dashboard({ onBack }: { onBack: () => void }) {
-  const [mode, setMode] = useState<"light" | "dark">("light");
-
-  const colorMode = useMemo(
-    () => ({
-      toggle: () => setMode((prev) => (prev === "light" ? "dark" : "light")),
-    }),
-    [],
-  );
-
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode,
-          ...(mode === "dark"
-            ? {
-                background: { default: "#0f1117", paper: "#1a1d27" },
-                primary: { main: "#6366f1" },
-              }
-            : {
-                background: { default: "#f9fafb", paper: "#ffffff" },
-                primary: { main: "#4f46e5" },
-              }),
-        },
-        typography: {
-          fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-        },
-        components: {
-          MuiTableCell: {
-            styleOverrides: {
-              root: { fontSize: 13 },
-              head: { fontWeight: 600, backgroundColor: "transparent" },
-            },
-          },
-          MuiChip: { styleOverrides: { root: { height: 22 } } },
-          MuiButton: { defaultProps: { disableElevation: true } },
-        },
-      }),
-    [mode],
-  );
-
-  return (
-    <ColorModeContext.Provider value={colorMode}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <DashboardInner onBack={onBack} />
-      </ThemeProvider>
-    </ColorModeContext.Provider>
-  );
+export default function Dashboard() {
+  return <DashboardContent />;
 }
