@@ -105,7 +105,6 @@ async function fetchAvailableModels(): Promise<Set<string>> {
       const response = await fetch(modelsUrl, {
         method: "GET",
         headers,
-        timeout: 5000,
       });
 
       console.log(`[LiteLLM] Response status: ${response.status}`);
@@ -562,10 +561,7 @@ export async function runLiteLlmTurn(args: {
   userText: string;
   onChunk?: (text: string) => void;
   onUsage?: (usage: LiteLlmUsageSnapshotV1) => void;
-  onToolCall?: (toolCall: {
-    toolCallId: string;
-    command: string;
-  }) => Promise<{
+  onToolCall?: (toolCall: { toolCallId: string; command: string }) => Promise<{
     stdout: string;
     stderr: string;
     exitCode: number;

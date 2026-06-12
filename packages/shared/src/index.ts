@@ -166,12 +166,7 @@ export type WsServerMessage =
 
 export {
   CLAUDE_SDK_MODEL_OPTIONS,
-  LITELLM_CHAT_MODEL_OPTIONS,
   getClaudeSdkModelPricing,
   getLiteLlmModelPricing,
 } from "./modelPrices";
-export type {
-  ClaudeSdkModelOption,
-  LiteLlmChatModelOption,
-  ModelPriceLookup,
-} from "./modelPrices";
+export type { ClaudeSdkModelOption, ModelPriceLookup } from "./modelPrices";
