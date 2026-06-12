@@ -170,7 +170,16 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
 
   useEffect(() => {
     if (!active) return;
-    requestAnimationFrame(() => fitResizeAndFocus());
+    // Two rAFs get past React's paint; the setTimeout lets the CSS layout
+    // fully resolve (flex/grid containers report their final height).
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        fitResizeAndFocus();
+        // Second pass after layout settles — catches cases where the container
+        // height is still in flux (e.g. switching from Artifacts tab).
+        window.setTimeout(() => fitResizeAndFocus(), 150);
+      })
+    );
   }, [active, sessionId]);
 
   // Expose a write function via a weak convention: App calls window event.

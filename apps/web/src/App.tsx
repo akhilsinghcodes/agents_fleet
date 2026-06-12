@@ -1,68 +1,72 @@
-import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@agents_fleet/shared";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createSession, deleteSession, listSessions, stopSession } from "./api";
 import ClaudeSdkChat from "./ClaudeSdkChat";
+import { DashboardContent } from "./Dashboard";
 import LiteLLMChat from "./LiteLLMChat";
-import { openWs, type WsServerMessage } from "./ws";
+import SessionArtifacts from "./SessionArtifacts";
 import TerminalPane from "./TerminalPane";
 import TerminalReplay from "./TerminalReplay";
-import SessionArtifacts from "./SessionArtifacts";
-import Dashboard from "./Dashboard";
+import { openWs, type WsServerMessage } from "./ws";
 
-import {
-  createTheme,
-  ThemeProvider,
-  CssBaseline,
-  Box,
-  Typography,
-  Button,
-  ButtonGroup,
-  Chip,
-  Alert,
-  Paper,
-  TextField,
-  Stack,
-  IconButton,
-  Tooltip,
-  Divider,
-} from "@mui/material";
-import BarChartIcon from "@mui/icons-material/BarChart";
-import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import AddIcon from "@mui/icons-material/Add";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
+import StopCircleOutlinedIcon from "@mui/icons-material/StopCircleOutlined";
+import {
+    Alert,
+    Box,
+    Button,
+    ButtonGroup,
+    Chip,
+    createTheme,
+    CssBaseline,
+    Divider,
+    IconButton,
+    Paper,
+    Stack,
+    TextField,
+    ThemeProvider,
+    Tooltip,
+    Typography,
+    useTheme,
+} from "@mui/material";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "dashboard";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
-  const styles: Record<
-    string,
-    { bgcolor: string; color: string; border?: string }
-  > = {
-    running: { bgcolor: "#dcfce7", color: "#15803d" },
-    exited: { bgcolor: "#fef3c7", color: "#b45309" },
-    stopped: { bgcolor: "#f1f5f9", color: "#475569" },
-    error: { bgcolor: "#fee2e2", color: "#dc2626" },
+  const styles: Record<string, { bgcolor: string; color: string; border?: string }> = {
+    running:  { bgcolor: "#dcfce7", color: "#15803d" },
+    exited:   { bgcolor: "#fef3c7", color: "#b45309" },
+    stopped:  { bgcolor: "#f1f5f9", color: "#475569" },
+    error:    { bgcolor: "#fee2e2", color: "#dc2626" },
   };
   const s = styles[status] ?? styles.stopped;
   return (
     <Chip
       label={status}
       size="small"
-      sx={{
-        height: 18,
-        fontSize: 10,
-        fontWeight: 700,
-        px: 0.25,
-        bgcolor: s.bgcolor,
-        color: s.color,
-        border: "none",
-      }}
+      sx={{ height: 18, fontSize: 10, fontWeight: 700, px: 0.25, bgcolor: s.bgcolor, color: s.color, border: "none" }}
     />
+  );
+}
+
+// ── Status dot (used in info bar only) ───────────────────────────────────────
+
+function StatusDot({ status }: { status: string }) {
+  const color =
+    status === "running"
+      ? "success.main"
+      : status === "error"
+      ? "error.main"
+      : "text.disabled";
+  return (
+    <FiberManualRecordIcon sx={{ fontSize: 9, color, flexShrink: 0 }} />
   );
 }
 
@@ -70,49 +74,10 @@ function StatusBadge({ status }: { status: string }) {
 
 function CommandBadge({ command }: { command: string }) {
   if (command === "[claude-sdk]")
-    return (
-      <Chip
-        label="Claude SDK"
-        size="small"
-        sx={{
-          height: 17,
-          fontSize: 10,
-          fontWeight: 700,
-          bgcolor: "#ede9fe",
-          color: "#6d28d9",
-          border: "none",
-        }}
-      />
-    );
+    return <Chip label="Claude SDK" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#6d28d9", border: "none" }} />;
   if (command === "[litellm-chat]")
-    return (
-      <Chip
-        label="LiteLLM"
-        size="small"
-        sx={{
-          height: 17,
-          fontSize: 10,
-          fontWeight: 700,
-          bgcolor: "#ccfbf1",
-          color: "#0f766e",
-          border: "none",
-        }}
-      />
-    );
-  return (
-    <Chip
-      label="Shell"
-      size="small"
-      sx={{
-        height: 17,
-        fontSize: 10,
-        fontWeight: 700,
-        bgcolor: "#e2e8f0",
-        color: "#334155",
-        border: "none",
-      }}
-    />
-  );
+    return <Chip label="LiteLLM" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ccfbf1", color: "#0f766e", border: "none" }} />;
+  return <Chip label="Shell" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#e2e8f0", color: "#334155", border: "none" }} />;
 }
 
 // ── Sessions sidebar ──────────────────────────────────────────────────────────
@@ -132,6 +97,7 @@ function SessionsSidebar({
   onSelect: (s: Session) => void;
   onDelete: (id: string) => void;
 }) {
+  const theme = useTheme();
   const visible = sessions.filter((s) => showAll || s.status === "running");
   const runningCount = sessions.filter((s) => s.status === "running").length;
 
@@ -141,7 +107,7 @@ function SessionsSidebar({
       square
       sx={{
         display: "grid",
-        gridTemplateRows: "52px 1fr",
+        gridTemplateRows: "52px 1fr auto",
         minHeight: 0,
         overflow: "hidden",
         borderLeft: 1,
@@ -180,7 +146,7 @@ function SessionsSidebar({
         </Button>
       </Box>
 
-      {/* List */}
+      {/* Session list */}
       <Box sx={{ overflow: "auto" }}>
         {visible.length === 0 ? (
           <Typography p={2} fontSize={13} color="text.secondary">
@@ -216,27 +182,14 @@ function SessionsSidebar({
                     color: "text.primary",
                     cursor: "pointer",
                     display: "block",
-                    "&:hover": {
-                      bgcolor: isSelected ? "#e0f4fc" : "action.hover",
-                    },
+                    "&:hover": { bgcolor: isSelected ? "#e0f4fc" : "action.hover" },
                     transition: "background 0.1s",
                   }}
                 >
-                  <Box
-                    display="flex"
-                    alignItems="center"
-                    gap={0.75}
-                    mb={0.5}
-                    flexWrap="wrap"
-                  >
+                  <Box display="flex" alignItems="center" gap={0.75} mb={0.5} flexWrap="wrap">
                     <StatusBadge status={s.status} />
                     <CommandBadge command={s.command} />
-                    <Typography
-                      fontSize={10}
-                      color="text.disabled"
-                      noWrap
-                      sx={{ ml: "auto" }}
-                    >
+                    <Typography fontSize={10} color="text.disabled" noWrap sx={{ ml: "auto" }}>
                       {new Date(s.created_at).toLocaleTimeString()}
                     </Typography>
                   </Box>
@@ -261,10 +214,7 @@ function SessionsSidebar({
                         top: 8,
                         right: 6,
                         color: "text.disabled",
-                        "&:hover": {
-                          color: "error.main",
-                          bgcolor: "action.hover",
-                        },
+                        "&:hover": { color: "error.main", bgcolor: "action.hover" },
                       }}
                     >
                       <DeleteOutlineIcon fontSize="small" />
@@ -276,19 +226,29 @@ function SessionsSidebar({
           })
         )}
       </Box>
+
+      {/* Credit */}
+      <Box sx={{ px: 2, py: 0.75, borderTop: 1, borderColor: "divider", bgcolor: "background.default" }}>
+        <Typography fontSize={11} color="text.disabled" textAlign="right">
+          Built by <Box component="span" sx={{ color: "#0891b2", fontWeight: 600 }}>Akhil Singh</Box>
+        </Typography>
+      </Box>
     </Paper>
   );
 }
 
 // ── Main app ──────────────────────────────────────────────────────────────────
 
-function MainApp({ onDashboard }: { onDashboard: () => void }) {
+function MainApp() {
+
   // ── Form state ──────────────────────────────────────────────────────────────
   const [repoPath, setRepoPath] = useState("");
   const [command, setCommand] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [budgetTokens, setBudgetTokens] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
+  const toastCounter = useRef(0);
 
   // ── Tab state ───────────────────────────────────────────────────────────────
   const [leftTab, setLeftTab] = useState<LeftTab>("shell");
@@ -311,11 +271,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
   async function refreshSessions(preserveSelected = true) {
     const next = await listSessions();
     setSessions(next);
-    if (
-      preserveSelected &&
-      selectedId &&
-      !next.some((s) => s.id === selectedId)
-    ) {
+    if (preserveSelected && selectedId && !next.some((s) => s.id === selectedId)) {
       setSelectedId(null);
     }
   }
@@ -326,6 +282,12 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
       refreshSessions().catch(() => undefined);
     }, 2000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
   }, []);
 
   // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -342,10 +304,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
       socket.send(JSON.stringify({ type: "subscribe", sessionId: selectedId }));
     socket.onmessage = (evt) => {
       const msg = JSON.parse(evt.data as string) as WsServerMessage;
-      if (msg.type === "error") {
-        setError(msg.message);
-        return;
-      }
+      if (msg.type === "error") { setError(msg.message); return; }
       if (msg.type === "pty" && msg.sessionId === selectedId) {
         window.dispatchEvent(
           new CustomEvent("agents_fleet:pty", {
@@ -355,16 +314,24 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
         return;
       }
       if (msg.type === "session") {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === msg.session.id ? msg.session : s)),
-        );
+        setSessions((prev) => prev.map((s) => (s.id === msg.session.id ? msg.session : s)));
+      }
+      if (msg.type === "budget_warning") {
+        const label = msg.kind === "usd"
+          ? `$${msg.current.toFixed(4)} / $${msg.budget.toFixed(2)}`
+          : `${msg.current.toLocaleString()} / ${msg.budget.toLocaleString()} tokens`;
+        const body = `Session ${msg.sessionId.slice(0, 8)} is at ${msg.pctUsed}% of its ${msg.kind} budget (${label}).`;
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("⚠️ Budget warning — Agents Fleet", { body });
+        }
+        // Always show in-app toast regardless of notification permission.
+        const id = ++toastCounter.current;
+        setToasts((prev) => [...prev, { id, message: body }]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 8000);
       }
     };
     socket.onerror = () => setError("WebSocket error");
-    return () => {
-      socket.close();
-      setWs(null);
-    };
+    return () => { socket.close(); setWs(null); };
   }, [selectedId]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -378,28 +345,19 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
         budgetUsd: budgetUsd.trim() ? Number(budgetUsd) : undefined,
         budgetTokens: budgetTokens.trim() ? Number(budgetTokens) : undefined,
       });
-      setRepoPath("");
-      setCommand("");
-      setBudgetUsd("");
-      setBudgetTokens("");
+      setRepoPath(""); setCommand(""); setBudgetUsd(""); setBudgetTokens("");
       await refreshSessions(false);
       setSelectedId(session.id);
       setCenterTab("terminal");
-    } catch (err) {
-      setError(String(err));
-    }
+    } catch (err) { setError(String(err)); }
   }
 
   async function onStop() {
     if (!selected) return;
     try {
       const updated = await stopSession(selected.id);
-      setSessions((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s)),
-      );
-    } catch (err) {
-      setError(String(err));
-    }
+      setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (err) { setError(String(err)); }
   }
 
   function onSelectSession(s: Session) {
@@ -423,6 +381,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
     { key: "shell", label: "Shell" },
     { key: "claude_sdk", label: "Claude (SDK)" },
     { key: "litellm", label: "LiteLLM" },
+    { key: "dashboard", label: "Spend Analytics" },
   ];
 
   // ── Center-tab config ────────────────────────────────────────────────────────
@@ -437,7 +396,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
       sx={{
         height: "100vh",
         display: "grid",
-        gridTemplateColumns: "1fr 300px",
+        gridTemplateColumns: leftTab === "dashboard" ? "1fr" : "1fr 300px",
         gridTemplateRows: "1fr",
         bgcolor: "background.default",
         overflow: "hidden",
@@ -447,7 +406,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
       <Box
         sx={{
           display: "grid",
-          gridTemplateRows: "52px 1fr auto",
+          gridTemplateRows: "52px 1fr",
           minHeight: 0,
           bgcolor: "background.paper",
           borderRight: 1,
@@ -472,52 +431,17 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
             fontWeight={800}
             fontSize={15}
             letterSpacing={1.5}
-            sx={{
-              mr: 1,
-              whiteSpace: "nowrap",
-              color: "#ffffff",
-              fontFamily: "ui-monospace, monospace",
-            }}
+            sx={{ mr: 1, whiteSpace: "nowrap", color: "#ffffff", fontFamily: "ui-monospace, monospace" }}
           >
             AGENT FLEET
           </Typography>
           <Chip
             label="beta"
             size="small"
-            sx={{
-              height: 16,
-              fontSize: 9,
-              fontWeight: 700,
-              bgcolor: "rgba(255,255,255,0.18)",
-              color: "#fff",
-              letterSpacing: 0.5,
-              mr: 1,
-            }}
+            sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: "rgba(255,255,255,0.18)", color: "#fff", letterSpacing: 0.5, mr: 1 }}
           />
 
           <Box flex={1} />
-
-          {/* Spend dashboard button */}
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<BarChartIcon fontSize="small" />}
-            onClick={onDashboard}
-            sx={{
-              textTransform: "none",
-              fontSize: 13,
-              mr: 1,
-              whiteSpace: "nowrap",
-              color: "#fff",
-              borderColor: "rgba(255,255,255,0.45)",
-              "&:hover": {
-                borderColor: "#fff",
-                bgcolor: "rgba(255,255,255,0.12)",
-              },
-            }}
-          >
-            Spend Dashboard
-          </Button>
 
           {/* Left-tab switcher */}
           <ButtonGroup size="small" variant="text" disableElevation>
@@ -528,8 +452,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                 sx={{
                   textTransform: "none",
                   fontWeight: leftTab === key ? 700 : 400,
-                  bgcolor:
-                    leftTab === key ? "rgba(255,255,255,0.22)" : "transparent",
+                  bgcolor: leftTab === key ? "rgba(255,255,255,0.22)" : "transparent",
                   color: "#fff",
                   borderRadius: 1.5,
                   px: 1.5,
@@ -559,29 +482,19 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                 ml: 0.5,
                 color: "#fff",
                 borderColor: "rgba(255,255,255,0.45)",
-                "&:hover": {
-                  borderColor: "#fff",
-                  bgcolor: "rgba(255,255,255,0.12)",
-                },
+                "&:hover": { borderColor: "#fff", bgcolor: "rgba(255,255,255,0.12)" },
               }}
             >
               New chat
             </Button>
           )}
+
         </Paper>
 
         {/* Content area */}
         <Box sx={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
           {leftTab === "claude_sdk" ? (
-            <Box
-              sx={{
-                p: 2.5,
-                overflow: "auto",
-                minHeight: 0,
-                display: "grid",
-                gridTemplateRows: "1fr",
-              }}
-            >
+            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
               {selected && selected.command === "[claude-sdk]" ? (
                 <ClaudeSdkChat mode="existing" sessionId={selected.id} />
               ) : (
@@ -598,15 +511,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
               )}
             </Box>
           ) : leftTab === "litellm" ? (
-            <Box
-              sx={{
-                p: 2.5,
-                overflow: "auto",
-                minHeight: 0,
-                display: "grid",
-                gridTemplateRows: "1fr",
-              }}
-            >
+            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
               {selected && selected.command === "[litellm-chat]" ? (
                 <LiteLLMChat mode="existing" sessionId={selected.id} />
               ) : (
@@ -622,15 +527,11 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                 />
               )}
             </Box>
+          ) : leftTab === "dashboard" ? (
+            <DashboardContent />
           ) : (
             /* Shell tab */
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateRows: "auto 1fr",
-                minHeight: 0,
-              }}
-            >
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
               {/* Shell creation form */}
               <Box
                 component="form"
@@ -671,10 +572,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     onChange={(e) => setBudgetUsd(e.target.value)}
                     size="small"
                     sx={{ width: 110 }}
-                    inputProps={{
-                      inputMode: "decimal",
-                      style: { fontSize: 13 },
-                    }}
+                    inputProps={{ inputMode: "decimal", style: { fontSize: 13 } }}
                     InputLabelProps={{ style: { fontSize: 13 } }}
                   />
                   <TextField
@@ -684,21 +582,14 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     onChange={(e) => setBudgetTokens(e.target.value)}
                     size="small"
                     sx={{ width: 120 }}
-                    inputProps={{
-                      inputMode: "numeric",
-                      style: { fontSize: 13 },
-                    }}
+                    inputProps={{ inputMode: "numeric", style: { fontSize: 13 } }}
                     InputLabelProps={{ style: { fontSize: 13 } }}
                   />
                   <Button
                     type="submit"
                     variant="contained"
                     disableElevation
-                    sx={{
-                      textTransform: "none",
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                    }}
+                    sx={{ textTransform: "none", fontWeight: 600, whiteSpace: "nowrap" }}
                   >
                     Start
                   </Button>
@@ -711,13 +602,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
               </Box>
 
               {/* Session header + terminal area */}
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateRows: "auto auto 1fr",
-                  minHeight: 0,
-                }}
-              >
+              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0 }}>
                 {/* Selected session info bar */}
                 {selected && (
                   <Box
@@ -738,68 +623,40 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                       fontSize={13}
                       fontWeight={500}
                       fontFamily="ui-monospace, monospace"
-                      sx={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
+                      sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       title={selected.repo_path}
                     >
                       {selected.repo_path}
                     </Typography>
                     <Divider orientation="vertical" flexItem />
-                    <Typography
-                      fontSize={12}
-                      color="text.secondary"
-                      sx={{ flexShrink: 0 }}
-                    >
-                      in{" "}
-                      <Box
-                        component="span"
-                        fontWeight={700}
-                        sx={{ color: "text.primary" }}
-                      >
-                        {selected.estimated_input_tokens.toLocaleString()}
-                      </Box>
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      in <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{selected.estimated_input_tokens.toLocaleString()}</Box>
                     </Typography>
-                    <Typography
-                      fontSize={12}
-                      color="text.secondary"
-                      sx={{ flexShrink: 0 }}
-                    >
-                      out{" "}
-                      <Box
-                        component="span"
-                        fontWeight={700}
-                        sx={{ color: "text.primary" }}
-                      >
-                        {selected.estimated_output_tokens.toLocaleString()}
-                      </Box>
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      out <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{selected.estimated_output_tokens.toLocaleString()}</Box>
                     </Typography>
-                    <Typography
-                      fontSize={12}
-                      color="text.secondary"
-                      sx={{ flexShrink: 0 }}
-                    >
-                      cost{" "}
-                      <Box
-                        component="span"
-                        fontWeight={700}
-                        sx={{ color: "text.primary" }}
-                      >
-                        ${selected.estimated_cost_usd.toFixed(4)}
-                      </Box>
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      cost <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)}</Box>
                     </Typography>
+                    {(selected.budget_tokens || selected.budget_usd) && (
+                      <>
+                        <Divider orientation="vertical" flexItem />
+                        {selected.budget_tokens && (
+                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                            total <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{(selected.estimated_input_tokens + selected.estimated_output_tokens).toLocaleString()} / {selected.budget_tokens.toLocaleString()}</Box>
+                          </Typography>
+                        )}
+                        {selected.budget_usd && (
+                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                            budget <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)} / ${selected.budget_usd.toFixed(2)}</Box>
+                          </Typography>
+                        )}
+                      </>
+                    )}
                     {selected.stop_reason && (
                       <>
                         <Divider orientation="vertical" flexItem />
-                        <Typography
-                          fontSize={12}
-                          fontWeight={500}
-                          sx={{ color: "#b45309", flexShrink: 0 }}
-                        >
+                        <Typography fontSize={12} fontWeight={500} sx={{ color: "#b45309", flexShrink: 0 }}>
                           {selected.stop_reason}
                         </Typography>
                       </>
@@ -808,14 +665,7 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     <Typography
                       fontSize={11}
                       fontFamily="ui-monospace, monospace"
-                      sx={{
-                        bgcolor: "#f1f5f9",
-                        color: "#475569",
-                        px: 0.75,
-                        py: 0.25,
-                        borderRadius: 1,
-                        flexShrink: 0,
-                      }}
+                      sx={{ bgcolor: "#f1f5f9", color: "#475569", px: 0.75, py: 0.25, borderRadius: 1, flexShrink: 0 }}
                     >
                       {selected.id.slice(0, 8)}
                     </Typography>
@@ -823,19 +673,10 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                       size="small"
                       variant="outlined"
                       color="error"
-                      startIcon={
-                        <StopCircleOutlinedIcon
-                          sx={{ fontSize: "14px !important" }}
-                        />
-                      }
+                      startIcon={<StopCircleOutlinedIcon sx={{ fontSize: "14px !important" }} />}
                       onClick={onStop}
                       disabled={selected.status !== "running"}
-                      sx={{
-                        textTransform: "none",
-                        fontSize: 12,
-                        py: 0.25,
-                        flexShrink: 0,
-                      }}
+                      sx={{ textTransform: "none", fontSize: 12, py: 0.25, flexShrink: 0 }}
                     >
                       Stop
                     </Button>
@@ -854,40 +695,30 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     bgcolor: "background.default",
                   }}
                 >
-                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map(
-                    (tab) => (
-                      <Button
-                        key={tab}
-                        size="small"
-                        onClick={() => setCenterTab(tab)}
-                        disabled={!selectedId}
-                        sx={{
-                          textTransform: "none",
-                          fontSize: 12,
-                          fontWeight: centerTab === tab ? 700 : 400,
-                          bgcolor: "transparent",
-                          color:
-                            centerTab === tab ? "#0891b2" : "text.secondary",
-                          borderRadius: 0,
-                          px: 1.5,
-                          py: 0.75,
-                          borderBottom:
-                            centerTab === tab
-                              ? "2px solid"
-                              : "2px solid transparent",
-                          borderColor:
-                            centerTab === tab ? "#0891b2" : "transparent",
-                          "&:hover": {
-                            bgcolor: "action.hover",
-                            color: "text.primary",
-                          },
-                          "&.Mui-disabled": { color: "text.disabled" },
-                        }}
-                      >
-                        {centerTabLabels[tab]}
-                      </Button>
-                    ),
-                  )}
+                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map((tab) => (
+                    <Button
+                      key={tab}
+                      size="small"
+                      onClick={() => setCenterTab(tab)}
+                      disabled={!selectedId}
+                      sx={{
+                        textTransform: "none",
+                        fontSize: 12,
+                        fontWeight: centerTab === tab ? 700 : 400,
+                        bgcolor: "transparent",
+                        color: centerTab === tab ? "#0891b2" : "text.secondary",
+                        borderRadius: 0,
+                        px: 1.5,
+                        py: 0.75,
+                        borderBottom: centerTab === tab ? "2px solid" : "2px solid transparent",
+                        borderColor: centerTab === tab ? "#0891b2" : "transparent",
+                        "&:hover": { bgcolor: "action.hover", color: "text.primary" },
+                        "&.Mui-disabled": { color: "text.disabled" },
+                      }}
+                    >
+                      {centerTabLabels[tab]}
+                    </Button>
+                  ))}
                 </Box>
 
                 {/* Terminal / logs / artifacts */}
@@ -899,19 +730,22 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
                     <TerminalReplay
                       sessionId={selectedId}
                       active
-                      freezeAtExit={selected?.command.trim() === "claude"}
+                      freezeAtExit={selected?.command.trim().startsWith("claude")}
                     />
                   )}
                   {selectedId && centerTab === "artifacts" && (
-                    <Box
-                      sx={{
-                        height: "100%",
-                        overflow: "auto",
-                        p: 2,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <SessionArtifacts sessionId={selectedId} />
+                    <Box sx={{ height: "100%", overflow: "auto", p: 2, boxSizing: "border-box" }}>
+                      <SessionArtifacts
+                        sessionId={selectedId}
+                        onResume={(newSessionId) => {
+                          if (newSessionId === "__pre_launch__") {
+                            setCenterTab("terminal");
+                            return;
+                          }
+                          void refreshSessions(false);
+                          setSelectedId(newSessionId);
+                        }}
+                      />
                     </Box>
                   )}
                   {!selectedId && (
@@ -925,43 +759,44 @@ function MainApp({ onDashboard }: { onDashboard: () => void }) {
           )}
         </Box>
 
-        {/* ── Footer ── */}
-        <Box
-          sx={{
-            borderTop: 1,
-            borderColor: "divider",
-            px: 3,
-            py: 0.75,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            bgcolor: "#f8fafc",
-          }}
-        >
-          <Typography
-            fontSize={11}
-            sx={{ color: "#94a3b8", fontWeight: 700, letterSpacing: 1 }}
-          >
-            AGENT FLEET
-          </Typography>
-          <Typography fontSize={11} sx={{ color: "#94a3b8" }}>
-            Built by{" "}
-            <Box component="span" sx={{ color: "#0891b2", fontWeight: 600 }}>
-              Akhil Singh
-            </Box>
-          </Typography>
-        </Box>
       </Box>
 
-      {/* ── Sessions sidebar ── */}
-      <SessionsSidebar
-        sessions={sessions}
-        selectedId={selectedId}
-        showAll={showAllSessions}
-        onToggleShowAll={() => setShowAllSessions((v) => !v)}
-        onSelect={onSelectSession}
-        onDelete={onDeleteSession}
-      />
+      {/* ── Sessions sidebar (only show for non-dashboard tabs) ── */}
+      {leftTab !== "dashboard" && (
+        <SessionsSidebar
+          sessions={sessions}
+          selectedId={selectedId}
+          showAll={showAllSessions}
+          onToggleShowAll={() => setShowAllSessions((v) => !v)}
+          onSelect={onSelectSession}
+          onDelete={onDeleteSession}
+        />
+      )}
+
+      {/* Budget warning toasts */}
+      {toasts.length > 0 && (
+        <Box sx={{ position: "fixed", bottom: 24, right: 24, display: "flex", flexDirection: "column", gap: 1, zIndex: 9999 }}>
+          {toasts.map((t) => (
+            <Box
+              key={t.id}
+              sx={{
+                display: "flex", alignItems: "flex-start", gap: 1,
+                px: 2, py: 1.5, borderRadius: 2,
+                background: "#fefce8", border: "1px solid #fbbf24",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                maxWidth: 360, fontSize: 13,
+              }}
+            >
+              <span style={{ fontSize: 16, lineHeight: 1.4 }}>⚠️</span>
+              <span style={{ flex: 1, color: "#92400e" }}>{t.message}</span>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#92400e", fontSize: 16, lineHeight: 1, padding: 0 }}
+              >×</button>
+            </Box>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -1021,17 +856,10 @@ const lightTheme = createTheme({
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage] = useState<"main" | "dashboard">("main");
-
-  // Dashboard has its own ThemeProvider + toggle internally.
-  // MainApp is always light — its child components (ClaudeSdkChat, SessionArtifacts, etc.)
-  // have hardcoded light colors that can't be toggled without rewriting them.
-  return page === "dashboard" ? (
-    <Dashboard onBack={() => setPage("main")} />
-  ) : (
+  return (
     <ThemeProvider theme={lightTheme}>
       <CssBaseline />
-      <MainApp onDashboard={() => setPage("dashboard")} />
+      <MainApp />
     </ThemeProvider>
   );
 }
