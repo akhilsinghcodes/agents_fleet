@@ -8,6 +8,12 @@ type ModelListFile = {
   }>;
 };
 
+type LiteLlmModelsResponse = {
+  data?: Array<{
+    id?: unknown;
+  }>;
+};
+
 type ModelPriceEntry = {
   input_cost_per_token?: number;
   output_cost_per_token?: number;
@@ -15,6 +21,46 @@ type ModelPriceEntry = {
 
 const modelList = modelsData as ModelListFile;
 const modelPriceEntries = modelPriceData as Record<string, ModelPriceEntry>;
+
+/**
+ * Fetch models from LITELLM_BASE_URL/v1/models endpoint.
+ * This is used during build-time or server initialization.
+ */
+export async function fetchLiteLlmModelsFromApi(
+  baseUrl: string,
+  apiKey?: string
+): Promise<ModelListFile | null> {
+  try {
+    const modelsUrl = new URL("/v1/models", baseUrl).toString();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // Add authorization header if API key is provided
+    if (apiKey && apiKey.trim().length > 0) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const response = await fetch(modelsUrl, {
+      method: "GET",
+      headers,
+      timeout: 5000,
+    });
+
+    if (response.ok) {
+      const data = (await response.json()) as LiteLlmModelsResponse;
+      if (data.data && data.data.length > 0) {
+        return data as ModelListFile;
+      }
+    }
+  } catch (error) {
+    console.warn(
+      `Failed to fetch models from LITELLM_BASE_URL: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return null;
+}
 
 export type ModelPriceLookup = {
   modelId: string;

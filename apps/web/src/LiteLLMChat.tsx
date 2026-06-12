@@ -52,6 +52,9 @@ function nowIso() {
 
 export default function LiteLLMChat(props: Props) {
   const [repoPath, setRepoPath] = useState("");
+  const [availableModels, setAvailableModels] = useState<string[]>(
+    LITELLM_CHAT_MODEL_OPTIONS,
+  );
   const [model, setModel] = useState<string>(
     LITELLM_CHAT_MODEL_OPTIONS[0] ?? "gpt-4o-mini",
   );
@@ -74,6 +77,25 @@ export default function LiteLLMChat(props: Props) {
     assistantItemId: string;
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Fetch available models from the backend
+  useEffect(() => {
+    fetch("/api/litellm/models")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.models && Array.isArray(data.models)) {
+          setAvailableModels(data.models);
+          // Update model selection if current selection is not in new list
+          if (!data.models.includes(model)) {
+            setModel(data.models[0] ?? "gpt-4o-mini");
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to fetch available models:", err);
+        // Fall back to static list on error
+      });
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -458,7 +480,7 @@ export default function LiteLLMChat(props: Props) {
                 border: "1px solid #d1d5db",
               }}
             >
-              {LITELLM_CHAT_MODEL_OPTIONS.map((option) => (
+              {availableModels.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
