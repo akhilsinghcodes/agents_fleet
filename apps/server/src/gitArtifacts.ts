@@ -125,6 +125,7 @@ export function captureResumeArtifact(sessionId: string, command: string) {
   const fullText = rows.map((r) => r.data).join("");
 
   // Strip ANSI escape sequences before matching.
+  // eslint-disable-next-line no-control-regex
   const clean = fullText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
 
   const prefix = command === "codex" ? "codex" : "claude";
