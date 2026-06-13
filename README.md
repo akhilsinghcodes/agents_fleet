@@ -123,7 +123,7 @@ This repository contains a **working MVP**:
 
 - Spend dashboard today
 
-![Spend dashboard today](screenshots/Spend_Dashboard_today.png)
+![Spend dashboard today](screenshots/Spend_Dashboard_Today.png)
 
 - Spend dashboard 7 days
 
@@ -211,7 +211,7 @@ See `ARCHITECTURE.md`.
 
 
 ## Prerequisites
-- Node.js 20.x
+- Node.js 20.x–24.x (Node 26+ not yet supported)
 - pnpm (Corepack is fine)
 
 ## Setup
@@ -400,6 +400,44 @@ On session **stop** and/or **exit**, Agents Fleet can capture a git snapshot for
 - Storage: `session_artifacts` table.
 - Toggle: set `AGENTS_FLEET_CAPTURE_GIT_ON_END=0` to disable capture.
 
+## Resource metrics
+
+Agents Fleet ships a `scripts/metrics` script that captures CPU, memory, swap, load, network I/O, disk I/O, open file descriptors, and SQLite DB size — scoped to AgentFleet processes only.
+
+```bash
+./scripts/metrics              # one-shot pretty print
+./scripts/metrics --watch      # live refresh every 3s
+./scripts/metrics --log        # continuous CSV log to data/metrics_<timestamp>.csv (every 5s)
+```
+
+To tail the log live while a session runs:
+```bash
+# Terminal 1
+./scripts/metrics --log
+
+# Terminal 2
+tail -f data/metrics_<timestamp>.csv
+```
+
+**Measured profile (Apple M4 Pro, 24GB RAM):**
+
+| Scenario | CPU% | Memory |
+|---|---|---|
+| Idle (server + vite only) | 0–1% | ~165MB |
+| Claude Shell session active | 1–4% | ~788MB |
+| Claude SDK tool calls firing | 3–17% | 600–665MB |
+| Git diff capture on stop | 12–47% | spike, clears fast |
+| LiteLLM / Spend Analytics | 0–3% | ~165MB |
+
+- Baseline footprint is tiny — 165MB, <1% CPU when no agent is running
+- Memory is almost entirely the Claude/Codex process itself, not AgentFleet overhead
+- Git diff capture is the heaviest single event (~12% typical, up to 47% if multiple sessions stop together) — lasts <10s and clears cleanly
+- No memory leaks observed — memory returns to baseline after every session exits
+- Swap usage unchanged throughout — AgentFleet does not add swap pressure
+- Data dir grows ~3MB per SDK session — worth monitoring on frequent use
+
+> GPU utilization is not captured without `sudo`. On Apple Silicon (unified memory) run `sudo powermetrics --samplers gpu_power` separately if needed.
+
 ## Scripts
 - `pnpm dev:one` installs deps if needed and runs dev for all workspaces (web + server).
 - `pnpm dev` runs dev for all workspaces (web + server) in parallel.
@@ -414,6 +452,7 @@ COREPACK_HOME="$PWD/.corepack" pnpm -C apps/server test
 
 ## Notes
 - If you see Corepack cache permission errors, the `COREPACK_HOME="$PWD/.corepack"` prefix keeps Corepack’s cache inside the repo.
+- **Node version:** Node 20–24 are supported. Node 26+ is blocked by `@homebridge/node-pty-prebuilt-multiarch` (`>=18 <25`). Node 22 and 24 work fine.
 
 ## Data location
 - SQLite DB: `data/agents_fleet.sqlite` (local only; do not commit).
