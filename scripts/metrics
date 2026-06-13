@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Agents Fleet — resource metrics snapshot
+# Usage: ./scripts/metrics          (pretty print, one-shot)
+#        ./scripts/metrics --watch  (refresh every 3s)
+#        ./scripts/metrics --csv    (CSV output, one-shot)
+#        ./scripts/metrics --log    (continuous CSV logging to data/metrics_<timestamp>.csv, every 5s)
+
+set -euo pipefail
+
+WATCH=false
+CSV=false
+LOG=false
+for arg in "$@"; do
+  case $arg in
+    --watch) WATCH=true ;;
+    --csv)   CSV=true ;;
+    --log)   LOG=true; CSV=true ;;
+  esac
+done
+
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PATTERNS=(
+  "tsx.*${REPO_ROOT}/apps/server"
+  "node.*${REPO_ROOT}/apps/server"
+  "${REPO_ROOT}.*vite"
+  "claude"
+  "codex"
+)
+
+header() {
+  printf "%-6s  %-40s  %6s  %8s  %8s\n" "PID" "PROCESS" "CPU%" "MEM(MB)" "THREADS"
+  printf "%-6s  %-40s  %6s  %8s  %8s\n" "------" "----------------------------------------" "------" "--------" "-------"
+}
+
+snapshot() {
+  local timestamp
+  timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+  # Collect matching PIDs
+  local pids=()
+  for pattern in "${PATTERNS[@]}"; do
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(pgrep -f "$pattern" 2>/dev/null || true)
+  done
+
+  local unique_pids
+  unique_pids=$(printf '%s\n' "${pids[@]}" | sort -u)
+
+  if [[ -z "$unique_pids" ]]; then
+    $CSV || echo "[$timestamp] No Agents Fleet processes found. Is it running? (pnpm dev:one)"
+    return
+  fi
+
+  # Per-process stats
+  local total_cpu=0 total_mem=0
+  local proc_lines=""
+
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    local stats
+    stats=$(ps -p "$pid" -o pid=,pcpu=,rss=,comm= 2>/dev/null || true)
+    [[ -z "$stats" ]] && continue
+    local p_pid p_cpu p_rss p_comm p_threads p_mem p_name
+    read -r p_pid p_cpu p_rss p_comm <<< "$stats"
+    p_threads=$(ps -M "$pid" 2>/dev/null | tail -n +2 | wc -l | tr -d ' ' || echo "?")
+    p_mem=$(awk "BEGIN {printf \"%.1f\", $p_rss/1024}")
+    p_name=$(ps -p "$pid" -o args= 2>/dev/null | sed 's|.*/||' | cut -c1-40 || echo "$p_comm")
+    total_cpu=$(awk "BEGIN {printf \"%.1f\", $total_cpu + $p_cpu}")
+    total_mem=$(awk "BEGIN {printf \"%.1f\", $total_mem + $p_mem}")
+    proc_lines+=$(printf "%-6s  %-40s  %6s  %8s  %8s\n" "$p_pid" "$p_name" "$p_cpu" "$p_mem" "$p_threads")$'\n'
+  done <<< "$unique_pids"
+
+  # System metrics
+  local sys_mem_total sys_mem_used swap_total swap_used load net_in net_out disk_read disk_write proc_total proc_running gpu_info
+  sys_mem_total=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f", $1/1024/1024}' || echo "?")
+  sys_mem_used=$(vm_stat 2>/dev/null | awk '
+    /Pages active/                 { active=$3 }
+    /Pages wired down/             { wired=$4 }
+    /Pages occupied by compressor/ { compressed=$5 }
+    END { printf "%.0f", (active+wired+compressed)*4096/1024/1024 }
+  ' | tr -d '.' || echo "?")
+  swap_total=$(sysctl -n vm.swapusage 2>/dev/null | awk '{print $3}' | tr -d 'M' || echo "?")
+  swap_used=$(sysctl -n vm.swapusage 2>/dev/null | awk '{print $6}' | tr -d 'M' || echo "?")
+  load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2, $3, $4}' || uptime | awk -F'load averages:' '{print $2}')
+  net_in=$(netstat -ib 2>/dev/null | awk 'NR>1 && $1!~/lo/ && $5~/^[0-9]+$/ {sum+=$7} END {printf "%.1f", sum/1024/1024}')
+  net_out=$(netstat -ib 2>/dev/null | awk 'NR>1 && $1!~/lo/ && $5~/^[0-9]+$/ {sum+=$10} END {printf "%.1f", sum/1024/1024}')
+  disk_read=$(iostat -d 2>/dev/null | awk 'NR==3{printf "%.1f", $3}' || echo "?")
+  disk_write=$(iostat -d 2>/dev/null | awk 'NR==3{printf "%.1f", $4}' || echo "?")
+  proc_total=$(ps aux 2>/dev/null | wc -l | tr -d ' ')
+  proc_running=$(ps aux 2>/dev/null | awk '$8=="R"' | wc -l | tr -d ' ')
+  gpu_info=$(system_profiler SPDisplaysDataType 2>/dev/null | awk '/Chipset Model/{print $3,$4,$5}' | head -1 || echo "unavailable")
+
+  if $CSV; then
+    # One summary row per snapshot
+    local load1 load5 load15
+    read -r load1 load5 load15 <<< "$load"
+    local db_mb data_mb
+    db_mb=$(du -sk "${REPO_ROOT}/data/agents_fleet.sqlite" 2>/dev/null | awk '{printf "%.1f", $1/1024}' || echo "0")
+    data_mb=$(du -sk "${REPO_ROOT}/data/" 2>/dev/null | awk '{printf "%.1f", $1/1024}' || echo "0")
+    echo "$timestamp,$total_cpu,$total_mem,$sys_mem_used,$sys_mem_total,$swap_used,$swap_total,$load1,$load5,$load15,$proc_total,$proc_running,$net_in,$net_out,$disk_read,$disk_write,$db_mb,$data_mb"
+  else
+    echo "[$timestamp]"
+    header
+    printf "%s" "$proc_lines"
+    printf "%-6s  %-40s  %6s  %8s\n" "------" "----------------------------------------" "------" "--------"
+    printf "%-6s  %-40s  %6s  %8s\n" "TOTAL" "" "$total_cpu%" "${total_mem}MB"
+
+    echo ""
+    echo "━━━ Per-process detail ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    while IFS= read -r pid; do
+      [[ -z "$pid" ]] && continue
+      local p_cmd fd_count net_count
+      p_cmd=$(ps -p "$pid" -o comm= 2>/dev/null | sed 's|.*/||' || echo "?")
+      fd_count=$(lsof -p "$pid" 2>/dev/null | wc -l | tr -d ' ')
+      net_count=$(lsof -p "$pid" -i 2>/dev/null | grep -c "ESTABLISHED\|LISTEN" || echo "0")
+      printf "PID %-6s %-20s  open FDs: %-6s  network connections: %s\n" "$pid" "$p_cmd" "$fd_count" "$net_count"
+    done <<< "$unique_pids"
+
+    echo ""
+    echo "━━━ Agents Fleet data ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "SQLite DB:  %s\n" "$(du -sh "${REPO_ROOT}/data/agents_fleet.sqlite" 2>/dev/null | awk '{print $1}' || echo 'not found')"
+    printf "Data dir:   %s total\n" "$(du -sh "${REPO_ROOT}/data/" 2>/dev/null | awk '{print $1}' || echo 'not found')"
+
+    echo ""
+    echo "━━━ System ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "RAM:       %sMB used / %sMB total\n" "$sys_mem_used" "$sys_mem_total"
+    printf "Swap:      %sMB used / %sMB total\n" "$swap_used" "$swap_total"
+    printf "Load avg:  %s (1m / 5m / 15m)\n"     "$load"
+    printf "Processes: %s total, %s running\n"    "$proc_total" "$proc_running"
+
+    echo ""
+    echo "━━━ I/O (since boot) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "Network:   %.1fMB in / %.1fMB out\n"     "$net_in" "$net_out"
+    printf "Disk:      %sMB/s read / %sMB/s write\n" "$disk_read" "$disk_write"
+
+    echo ""
+    echo "━━━ GPU ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "Chip:      %s (unified memory)\n" "$gpu_info"
+    printf "Note:      GPU utilization requires: sudo powermetrics --samplers gpu_power\n"
+  fi
+}
+
+if $LOG; then
+  LOG_FILE="${REPO_ROOT}/data/metrics_$(date +%Y%m%d_%H%M%S).csv"
+  echo "timestamp,total_cpu_pct,total_mem_mb,ram_used_mb,ram_total_mb,swap_used_mb,swap_total_mb,load_1m,load_5m,load_15m,procs_total,procs_running,net_in_mb,net_out_mb,disk_read_mbs,disk_write_mbs,db_size_mb,data_dir_mb" > "$LOG_FILE"
+  echo "Logging to $LOG_FILE (every 5s) — Ctrl+C to stop"
+  echo "Tip: tail -f $LOG_FILE"
+  while true; do
+    snapshot >> "$LOG_FILE"
+    sleep 5
+  done
+elif $WATCH; then
+  while true; do
+    clear
+    snapshot
+    sleep 3
+  done
+else
+  snapshot
+fi

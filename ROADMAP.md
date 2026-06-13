@@ -10,8 +10,8 @@
 ## Next (Agent mission control)
 1. **Multiple sessions management** — Batch-stop, group by repo, launch parallel sessions from the UI. Core to the "fleet" value prop.
 2. **Per-session artifacts UX** — View/export bundle (diff, changed files list, PTY replay export).
-3. **Model pricing configurable** — env/JSON override instead of hardcoded table.
-4. **Budget accuracy hardening** — Model-specific pricing and SDK-reported usage everywhere; add tests.
+3. **Budget accuracy hardening** — Model-specific pricing and SDK-reported usage everywhere; add tests.
+4. **System resource monitoring** — CPU, memory, and GPU usage live in the UI via `systeminformation`. Per-session PID tracking to show exactly what each agent consumes.
 
 ## Later
 - Paste/attachments in Claude (SDK) and LiteLLM chat (images, files via Anthropic Files API).
