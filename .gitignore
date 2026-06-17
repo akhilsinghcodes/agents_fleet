@@ -51,3 +51,5 @@ test-results/
 # Optional: keep large local demo videos out of git history
 screenshots/*.mov
 .env.local
+.venv
+data/headroom-requests.jsonl

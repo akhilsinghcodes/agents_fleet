@@ -1,8 +1,8 @@
-import type { Session, WsServerMessage } from "@ai_watchtower/shared";
+import type { Session, WsServerMessage } from "@agents_fleet/shared";
 import {
     LITELLM_CHAT_MODEL_OPTIONS,
     getLiteLlmModelPricing,
-} from "@ai_watchtower/shared";
+} from "@agents_fleet/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
     createLiteLlmSession,

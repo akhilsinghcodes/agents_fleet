@@ -165,9 +165,29 @@ This repository contains a **working MVP**:
 
 ![Headroom chat tab](screenshots/Headroom_Chat.png)
 
-- Headroom spend analytics card (tokens saved, savings %)
+- Headroom chat session in progress
 
-![Headroom spend analytics](screenshots/Headroom_Spend_Analytics.png)
+![Headroom chat session](screenshots/Headroom_Chat_Session.png)
+
+- Spend Analytics — session overview (agent usage + savings breakdown)
+
+![Headroom session overview](screenshots/Headroom_Spend_Session_Overview.png)
+
+- Prefix cache impact (cache reads, writes, hit rate)
+
+![Headroom prefix cache impact](screenshots/Headroom_Prefix_Cache_Impact.png)
+
+- Performance stats (token usage + pipeline breakdown)
+
+![Headroom performance stats](screenshots/Headroom_Performance_Stats.png)
+
+- Per-model token savings + recent requests
+
+![Headroom per-model and recent requests](screenshots/Headroom_Per_Model_Recent_Requests.png)
+
+- Request Log tab (per-request detail: model, tokens, latency, cache, status)
+
+![Headroom request log](screenshots/Headroom_Request_Log.png)
 
 - Headroom vs LiteLLM token comparison
 

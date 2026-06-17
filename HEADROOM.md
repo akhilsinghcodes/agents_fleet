@@ -14,6 +14,24 @@ This document covers setup, usage, debugging, configuration, privacy, and where 
 find each piece of the implementation in the source tree.
 
 
+## Screenshots
+
+**Spend Analytics — Headroom session overview (agent usage + savings breakdown)**
+![Headroom session overview](screenshots/Headroom_Spend_Session_Overview.png)
+
+**Prefix cache impact (cache reads, writes, hit rate)**
+![Headroom prefix cache impact](screenshots/Headroom_Prefix_Cache_Impact.png)
+
+**Performance stats (token usage + pipeline breakdown)**
+![Headroom performance stats](screenshots/Headroom_Performance_Stats.png)
+
+**Per-model token savings + recent requests**
+![Headroom per-model and recent requests](screenshots/Headroom_Per_Model_Recent_Requests.png)
+
+**Request Log tab (per-request detail: model, tokens, latency, cache, status)**
+![Headroom request log](screenshots/Headroom_Request_Log.png)
+
+
 ## How compression works (conceptual)
 
 1. You send a message in the Headroom tab.
