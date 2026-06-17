@@ -453,7 +453,11 @@ export class ProcessManager {
       if (!session) return;
 
       // Only accept updates for Claude PTY sessions for MVP.
-      if (session.command.trim() !== "claude") return;
+      const rawCmd = session.command.trim();
+      const effectiveCmd = rawCmd.startsWith("[headroom-shell]:")
+        ? rawCmd.slice("[headroom-shell]:".length)
+        : rawCmd;
+      if (effectiveCmd !== "claude") return;
 
       // Trust the client-rendered statusline as authoritative. Take the max for
       // each field so transient zero/lower readings don't clobber real values.
@@ -553,6 +557,7 @@ export class ProcessManager {
     command: string;
     cols?: number;
     rows?: number;
+    headroom?: boolean;
   }) {
     const cols = args.cols ?? 120;
     const rows = args.rows ?? 30;
@@ -561,6 +566,14 @@ export class ProcessManager {
     if (process.platform !== "win32") {
       env.LANG ??= "en_US.UTF-8";
       env.TERM ??= "xterm-256color";
+    }
+    if (args.headroom) {
+      env.ANTHROPIC_BASE_URL = "http://localhost:8787";
+      env.OPENAI_BASE_URL = "http://localhost:8787/v1";
+    }
+    if (args.headroom) {
+      env.ANTHROPIC_BASE_URL = "http://localhost:8787";
+      env.OPENAI_BASE_URL = "http://localhost:8787/v1";
     }
 
     const shell =
@@ -581,6 +594,9 @@ export class ProcessManager {
       handleFlowControl: true,
     });
 
+    const sessionStart = Date.now();
+    let headroomStatsPoller: NodeJS.Timer | null = null;
+
     this.running.set(args.sessionId, {
       pty: p,
       cols,
@@ -600,6 +616,21 @@ export class ProcessManager {
       });
       if (updated) this.hub.broadcastSession(updated);
     })();
+
+    if (args.headroom) {
+      headroomStatsPoller = setInterval(async () => {
+        try {
+          const res = await fetch("http://localhost:8787/stats", {
+            timeout: 2000,
+          });
+          if (!res.ok) return;
+          const stats = await res.json() as any;
+          // Stats are fetched here for future use (e.g. compression savings display).
+          // Token tracking for headroom-shell claude sessions is handled by the
+          // AF status line parser, so we intentionally do not call applyUsageTick.
+        } catch {}
+      }, 3000);
+    }
 
     const handleOutputText = async (text: string) => {
       // PTY streams include ANSI escape codes (colors, cursor moves, clears) which can wildly
@@ -780,6 +811,7 @@ export class ProcessManager {
     });
 
     p.onExit(({ exitCode, signal }) => {
+      if (headroomStatsPoller) clearInterval(headroomStatsPoller);
       const r0 = this.running.get(args.sessionId);
       if (r0) {
         for (const resolve of r0.exitWaiters) resolve();

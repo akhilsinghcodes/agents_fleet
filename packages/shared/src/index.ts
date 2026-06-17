@@ -41,6 +41,7 @@ export type CreateSessionRequest = {
   command: string;
   budgetUsd?: number;
   budgetTokens?: number;
+  headroom?: boolean;
 };
 
 export type CreateClaudeSdkSessionRequest = {

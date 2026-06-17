@@ -420,6 +420,30 @@ export async function getHeadroomStats(proxyUrl: string): Promise<HeadroomStatsR
   return json as HeadroomStatsResponse;
 }
 
+export type HeadroomRequestRow = {
+  request_id: string;
+  timestamp: string;
+  provider: string;
+  model: string;
+  input_tokens_original: number;
+  input_tokens_optimized: number;
+  output_tokens: number;
+  tokens_saved: number;
+  savings_percent: number;
+  optimization_latency_ms: number;
+  total_latency_ms: number;
+  cache_hit: boolean;
+  error: string | null;
+  tags?: Record<string, string>;
+};
+
+export async function getHeadroomRequests(limit = 500): Promise<HeadroomRequestRow[]> {
+  const res = await fetch(`/api/dashboard/headroom/requests?limit=${limit}`);
+  const json = await parseJson<{ rows: HeadroomRequestRow[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return (json as { rows: HeadroomRequestRow[] }).rows;
+}
+
 export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLMSpendResponse> {
   const res = await fetch(`/api/dashboard/litellm/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
   const json = await parseJson<LiteLLMSpendResponse | ApiErrorShape>(res);

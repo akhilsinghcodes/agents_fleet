@@ -33,7 +33,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom" | "dashboard";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -64,7 +64,9 @@ function CommandBadge({ command }: { command: string }) {
   if (command === "[litellm-chat]")
     return <Chip label="LiteLLM" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ccfbf1", color: "#0f766e", border: "none" }} />;
   if (command === "[headroom-chat]")
-    return <Chip label="Headroom" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#7c3aed", border: "none" }} />;
+    return <Chip label="Headroom Chat" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#7c3aed", border: "none" }} />;
+  if (command.startsWith("[headroom-shell]"))
+    return <Chip label="Headroom Shell" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#7c3aed", border: "none" }} />;
   return <Chip label="Shell" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#e2e8f0", color: "#334155", border: "none" }} />;
 }
 
@@ -85,8 +87,19 @@ function SessionsSidebar({
   onSelect: (s: Session) => void;
   onDelete: (id: string) => void;
 }) {
-  const visible = sessions.filter((s) => showAll || s.status === "running");
+  const [query, setQuery] = useState("");
   const runningCount = sessions.filter((s) => s.status === "running").length;
+
+  const visible = useMemo(() => {
+    const base = sessions.filter((s) => showAll || s.status === "running");
+    if (!query.trim()) return base;
+    const q = query.toLowerCase();
+    return base.filter((s) =>
+      s.command?.toLowerCase().includes(q) ||
+      s.session_title?.toLowerCase().includes(q) ||
+      s.repo_path?.toLowerCase().includes(q),
+    );
+  }, [sessions, showAll, query]);
 
   return (
     <Paper
@@ -94,7 +107,7 @@ function SessionsSidebar({
       square
       sx={{
         display: "grid",
-        gridTemplateRows: "52px 1fr auto",
+        gridTemplateRows: "52px auto 1fr auto",
         minHeight: 0,
         overflow: "hidden",
         borderLeft: 1,
@@ -133,11 +146,23 @@ function SessionsSidebar({
         </Button>
       </Box>
 
+      {/* Search */}
+      <Box px={1.5} py={1} sx={{ borderBottom: 1, borderColor: "divider" }}>
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Search sessions…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          inputProps={{ style: { fontSize: 12 } }}
+        />
+      </Box>
+
       {/* Session list */}
       <Box sx={{ overflow: "auto" }}>
         {visible.length === 0 ? (
           <Typography p={2} fontSize={13} color="text.secondary">
-            {showAll ? "No sessions yet." : "No running sessions."}
+            {query.trim() ? "No sessions match your search." : showAll ? "No sessions yet." : "No running sessions."}
           </Typography>
         ) : (
           visible.map((s) => {
@@ -181,7 +206,7 @@ function SessionsSidebar({
                     </Typography>
                   </Box>
                   <Typography fontWeight={600} fontSize={13} mb={0.25} noWrap>
-                    {s.command}
+                    {s.command.startsWith("[headroom-shell]:") || s.command.startsWith("[headroom-shell]:") ? s.command.split(":").slice(1).join(":") : s.command}
                   </Typography>
                   <Typography fontSize={11} color="text.secondary" noWrap>
                     {s.repo_path}
@@ -351,7 +376,8 @@ function MainApp() {
   function onSelectSession(s: Session) {
     if (s.command === "[claude-sdk]") setLeftTab("claude_sdk");
     else if (s.command === "[litellm-chat]") setLeftTab("litellm");
-    else if (s.command === "[headroom-chat]") setLeftTab("headroom");
+    else if (s.command === "[headroom-chat]") setLeftTab("headroom_chat");
+    else if (s.command.startsWith("[headroom-shell]")) setLeftTab("headroom_shell");
     else setLeftTab("shell");
     setSelectedId(s.id);
   }
@@ -370,7 +396,8 @@ function MainApp() {
     { key: "shell", label: "Shell" },
     { key: "claude_sdk", label: "Claude (SDK)" },
     { key: "litellm", label: "LiteLLM" },
-    { key: "headroom", label: "Headroom" },
+    { key: "headroom_chat", label: "Headroom Chat" },
+    { key: "headroom_shell", label: "Headroom Shell" },
     { key: "dashboard", label: "Spend Analytics" },
   ];
 
@@ -456,7 +483,7 @@ function MainApp() {
           </ButtonGroup>
 
           {/* New chat ghost button */}
-          {(leftTab === "claude_sdk" || leftTab === "litellm" || leftTab === "headroom") && (
+          {(leftTab === "claude_sdk" || leftTab === "litellm" || leftTab === "headroom_chat") && (
             <Button
               size="small"
               variant="outlined"
@@ -464,7 +491,7 @@ function MainApp() {
               onClick={() => {
                 setSelectedId(null);
                 if (leftTab === "claude_sdk") setClaudeDraftNonce((n) => n + 1);
-                else if (leftTab === "headroom") setHeadroomDraftNonce((n) => n + 1);
+                else if (leftTab === "headroom_chat") setHeadroomDraftNonce((n) => n + 1);
                 else setLiteLlmDraftNonce((n) => n + 1);
               }}
               sx={{
@@ -518,7 +545,7 @@ function MainApp() {
                 />
               )}
             </Box>
-          ) : leftTab === "headroom" ? (
+          ) : leftTab === "headroom_chat" ? (
             <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
               {selected && selected.command === "[headroom-chat]" ? (
                 <HeadroomChat mode="existing" sessionId={selected.id} />
@@ -534,6 +561,253 @@ function MainApp() {
                   }}
                 />
               )}
+            </Box>
+          ) : leftTab === "headroom_shell" ? (
+            /* Headroom Shell tab - identical to Shell tab but with headroom: true */
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
+              {/* Headroom Shell creation form */}
+              <Box
+                component="form"
+                onSubmit={(e: React.FormEvent) => {
+                  e.preventDefault();
+                  setError(null);
+                  try {
+                    createSession({
+                      repoPath: repoPath.trim(),
+                      command,
+                      budgetUsd: budgetUsd.trim() ? Number(budgetUsd) : undefined,
+                      budgetTokens: budgetTokens.trim() ? Number(budgetTokens) : undefined,
+                      headroom: true,
+                    })
+                      .then((session) => {
+                        setRepoPath(""); setCommand(""); setBudgetUsd(""); setBudgetTokens("");
+                        return refreshSessions(false).then(() => {
+                          setSelectedId(session.id);
+                          setCenterTab("terminal");
+                        });
+                      })
+                      .catch((err) => setError(String(err)));
+                  } catch (err) { setError(String(err)); }
+                }}
+                sx={{
+                  px: 2.5,
+                  py: 1.5,
+                  borderBottom: 1,
+                  borderColor: "divider",
+                  bgcolor: "background.default",
+                }}
+              >
+                <Stack direction="row" gap={1} alignItems="flex-end">
+                  <TextField
+                    label="Repo path"
+                    placeholder="/path/to/repo"
+                    value={repoPath}
+                    onChange={(e) => setRepoPath(e.target.value)}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    inputProps={{ style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Command"
+                    placeholder="claude"
+                    value={command}
+                    onChange={(e) => setCommand(e.target.value)}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    inputProps={{ style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Budget USD"
+                    placeholder="optional"
+                    value={budgetUsd}
+                    onChange={(e) => setBudgetUsd(e.target.value)}
+                    size="small"
+                    sx={{ width: 110 }}
+                    inputProps={{ inputMode: "decimal", style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <TextField
+                    label="Budget tokens"
+                    placeholder="optional"
+                    value={budgetTokens}
+                    onChange={(e) => setBudgetTokens(e.target.value)}
+                    size="small"
+                    sx={{ width: 120 }}
+                    inputProps={{ inputMode: "numeric", style: { fontSize: 13 } }}
+                    InputLabelProps={{ style: { fontSize: 13 } }}
+                  />
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    disableElevation
+                    sx={{ textTransform: "none", fontWeight: 600, whiteSpace: "nowrap" }}
+                  >
+                    Start
+                  </Button>
+                </Stack>
+                {error && (
+                  <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: 12 }}>
+                    {error}
+                  </Alert>
+                )}
+              </Box>
+
+              {/* Session header + terminal area */}
+              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0 }}>
+                {/* Selected session info bar */}
+                {selected && (
+                  <Box
+                    sx={{
+                      px: 2.5,
+                      py: 0.875,
+                      borderBottom: 1,
+                      borderColor: "divider",
+                      bgcolor: "background.default",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1.5,
+                      minWidth: 0,
+                    }}
+                  >
+                    <StatusBadge status={selected.status} />
+                    <Typography
+                      fontSize={13}
+                      fontWeight={500}
+                      fontFamily="ui-monospace, monospace"
+                      sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={selected.repo_path}
+                    >
+                      {selected.repo_path}
+                    </Typography>
+                    <Divider orientation="vertical" flexItem />
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      in <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{selected.estimated_input_tokens.toLocaleString()}</Box>
+                    </Typography>
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      out <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{selected.estimated_output_tokens.toLocaleString()}</Box>
+                    </Typography>
+                    <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                      cost <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)}</Box>
+                    </Typography>
+                    {(selected.budget_tokens || selected.budget_usd) && (
+                      <>
+                        <Divider orientation="vertical" flexItem />
+                        {selected.budget_tokens && (
+                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                            total <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{(selected.estimated_input_tokens + selected.estimated_output_tokens).toLocaleString()} / {selected.budget_tokens.toLocaleString()}</Box>
+                          </Typography>
+                        )}
+                        {selected.budget_usd && (
+                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
+                            budget <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)} / ${selected.budget_usd.toFixed(2)}</Box>
+                          </Typography>
+                        )}
+                      </>
+                    )}
+                    {selected.stop_reason && (
+                      <>
+                        <Divider orientation="vertical" flexItem />
+                        <Typography fontSize={12} fontWeight={500} sx={{ color: "#b45309", flexShrink: 0 }}>
+                          {selected.stop_reason}
+                        </Typography>
+                      </>
+                    )}
+                    <Divider orientation="vertical" flexItem />
+                    <Typography
+                      fontSize={11}
+                      fontFamily="ui-monospace, monospace"
+                      sx={{ bgcolor: "#f1f5f9", color: "#475569", px: 0.75, py: 0.25, borderRadius: 1, flexShrink: 0 }}
+                    >
+                      {selected.id.slice(0, 8)}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={<StopCircleOutlinedIcon sx={{ fontSize: "14px !important" }} />}
+                      onClick={onStop}
+                      disabled={selected.status !== "running"}
+                      sx={{ textTransform: "none", fontSize: 12, py: 0.25, flexShrink: 0 }}
+                    >
+                      Stop
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Center tab bar */}
+                <Box
+                  sx={{
+                    display: "flex",
+                    gap: 0.25,
+                    px: 2,
+                    py: 0.75,
+                    borderBottom: 1,
+                    borderColor: "divider",
+                    bgcolor: "background.default",
+                  }}
+                >
+                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map((tab) => (
+                    <Button
+                      key={tab}
+                      size="small"
+                      onClick={() => setCenterTab(tab)}
+                      disabled={!selectedId}
+                      sx={{
+                        textTransform: "none",
+                        fontSize: 12,
+                        fontWeight: centerTab === tab ? 700 : 400,
+                        bgcolor: "transparent",
+                        color: centerTab === tab ? "#0891b2" : "text.secondary",
+                        borderRadius: 0,
+                        px: 1.5,
+                        py: 0.75,
+                        borderBottom: centerTab === tab ? "2px solid" : "2px solid transparent",
+                        borderColor: centerTab === tab ? "#0891b2" : "transparent",
+                        "&:hover": { bgcolor: "action.hover", color: "text.primary" },
+                        "&.Mui-disabled": { color: "text.disabled" },
+                      }}
+                    >
+                      {centerTabLabels[tab]}
+                    </Button>
+                  ))}
+                </Box>
+
+                {/* Terminal / logs / artifacts */}
+                <Box sx={{ minHeight: 0, overflow: "hidden" }}>
+                  {selectedId && centerTab === "terminal" && (
+                    <TerminalPane sessionId={selectedId} ws={ws} active />
+                  )}
+                  {selectedId && centerTab === "logs" && (
+                    <TerminalReplay
+                      sessionId={selectedId}
+                      active
+                      freezeAtExit={selected?.command.trim().startsWith("claude")}
+                    />
+                  )}
+                  {selectedId && centerTab === "artifacts" && (
+                    <Box sx={{ height: "100%", overflow: "auto", p: 2, boxSizing: "border-box" }}>
+                      <SessionArtifacts
+                        sessionId={selectedId}
+                        onResume={(newSessionId) => {
+                          if (newSessionId === "__pre_launch__") {
+                            setCenterTab("terminal");
+                            return;
+                          }
+                          void refreshSessions(false);
+                          setSelectedId(newSessionId);
+                        }}
+                      />
+                    </Box>
+                  )}
+                  {!selectedId && (
+                    <Typography p={2.5} fontSize={13} color="text.secondary">
+                      Start a session to see output here.
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
             </Box>
           ) : leftTab === "dashboard" ? (
             <DashboardContent />

@@ -77,6 +77,22 @@ ensure_kompress_model() {
 }
 
 launch_headroom() {
+  # Kill any existing process on the headroom port before starting.
+  local existing_pid
+  existing_pid=$(lsof -ti :"$HEADROOM_PORT" 2>/dev/null || true)
+  if [ -n "$existing_pid" ]; then
+    echo "[agents_fleet] Stopping existing process on port $HEADROOM_PORT (pid $existing_pid)..."
+    kill "$existing_pid" 2>/dev/null || true
+    sleep 1
+  fi
+
+  # Ensure torch is installed (needed for ML compression). Uses pip cache after first download.
+  local VENV_PIP_CMD="$REPO_ROOT/.venv/bin/pip"
+  if [ -f "$VENV_PIP_CMD" ] && ! "$REPO_ROOT/.venv/bin/python" -c "import torch" >/dev/null 2>&1; then
+    echo "[agents_fleet] Installing torch for ML compression (cached after first run)..."
+    "$VENV_PIP_CMD" install torch
+  fi
+
   if [ -z "${LITELLM_BASE_URL:-}" ]; then
     echo "[agents_fleet] WARNING: LITELLM_BASE_URL is not set -- headroom will call external endpoints directly"
   else
@@ -84,9 +100,14 @@ launch_headroom() {
   fi
   echo "[agents_fleet] Starting headroom proxy on port $HEADROOM_PORT..."
   HEADROOM_TELEMETRY=off \
+  TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
+  TOKENIZERS_PARALLELISM=false \
   OPENAI_TARGET_API_URL="${LITELLM_BASE_URL:-}" \
   OPENAI_API_KEY="${LITELLM_API_KEY:-}" \
-  headroom proxy --port "$HEADROOM_PORT" >"$REPO_ROOT/data/headroom.log" 2>&1 &
+  "$HEADROOM_CMD" proxy --port "$HEADROOM_PORT" \
+    --memory \
+    --log-file "$REPO_ROOT/data/headroom-requests.jsonl" \
+  >"$REPO_ROOT/data/headroom.log" 2>&1 &
   HEADROOM_PID=$!
 
   echo "[agents_fleet] Waiting for headroom proxy to be ready (first run downloads the model, may take a minute)..."
@@ -107,11 +128,20 @@ launch_headroom() {
 }
 
 start_headroom() {
-  if command -v headroom >/dev/null 2>&1; then
+  # Check for headroom in venv or system PATH
+  if [ -f "$REPO_ROOT/.venv/bin/headroom" ]; then
+    export HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
+  elif command -v headroom >/dev/null 2>&1; then
+    export HEADROOM_CMD="headroom"
+  else
+    export HEADROOM_CMD=""
+  fi
+
+  if [ -n "$HEADROOM_CMD" ]; then
     ensure_kompress_model
     launch_headroom
   else
-    printf "%s" "[agents_fleet] headroom not found. Install it now with pip? [Y/n]: "
+    printf "%s" "[agents_fleet] headroom not found. Install it now? [Y/n]: "
     if [ -r /dev/tty ]; then
       read -r answer </dev/tty || answer="n"
     else
@@ -120,18 +150,120 @@ start_headroom() {
     case "$answer" in
       [nN]*) echo "[agents_fleet] Skipping headroom setup" ;;
       *)
-        if command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
-          PIP=$(command -v pip3 2>/dev/null || command -v pip)
-          echo "[agents_fleet] Installing headroom-ai..."
-          if "$PIP" install "headroom-ai" "httpx[http2]" --quiet; then
-            ensure_kompress_model
-            launch_headroom
-          else
-            echo "[agents_fleet] pip install failed -- skipping headroom"
+        # Find Python 3 - prefer 3.13 or 3.10 for headroom-ai compatibility
+        PYTHON_CMD=""
+        for PY_CMD in python3.13 python3.10 python3 python; do
+          if command -v "$PY_CMD" >/dev/null 2>&1; then
+            PYTHON_CMD="$PY_CMD"
+            break
           fi
-        else
-          echo "[agents_fleet] pip not found -- skipping headroom (install manually: pip install headroom-ai)"
+        done
+
+        if [ -z "$PYTHON_CMD" ]; then
+          echo "[agents_fleet] ERROR: python3 not found"
+          echo "[agents_fleet] Install Python 3.10 or 3.13: https://www.python.org/downloads/"
+          echo "[agents_fleet] Skipping headroom setup"
+          return
         fi
+
+        # Check Python version
+        PYTHON_VERSION=$("$PYTHON_CMD" --version 2>&1 | awk '{print $2}')
+        PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+        PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+        # headroom-ai requires 3.10+ but PyO3 only supports up to 3.13
+        if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
+          echo ""
+          echo "[agents_fleet] ERROR: Python version too old"
+          echo "[agents_fleet] headroom-ai requires Python 3.10+, but you have $PYTHON_VERSION"
+          echo "[agents_fleet] Install from: https://www.python.org/downloads/"
+          echo "[agents_fleet] Skipping headroom setup"
+          return
+        fi
+
+        if [ "$PYTHON_MAJOR" -gt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -gt 13 ]); then
+          echo ""
+          echo "[agents_fleet] ERROR: Python version too new"
+          echo "[agents_fleet] headroom-ai requires Python 3.10-3.13 (PyO3 doesn't support $PYTHON_MAJOR.$PYTHON_MINOR yet)"
+          echo "[agents_fleet] Please use Python 3.13:"
+          echo "  brew install python@3.13"
+          echo "  alias python3=/opt/homebrew/bin/python3.13"
+          echo "[agents_fleet] Skipping headroom setup"
+          return
+        fi
+
+        # Create or clean virtual environment
+        if [ -d "$REPO_ROOT/.venv" ]; then
+          # Check if venv was created with different Python version
+          VENV_PYTHON="$REPO_ROOT/.venv/bin/python"
+          if [ -f "$VENV_PYTHON" ]; then
+            VENV_VERSION=$("$VENV_PYTHON" --version 2>&1 | awk '{print $2}')
+            if [ "$VENV_VERSION" != "$PYTHON_VERSION" ]; then
+              echo "[agents_fleet] Removing old .venv (was Python $VENV_VERSION, need $PYTHON_VERSION)..."
+              rm -rf "$REPO_ROOT/.venv"
+            fi
+          fi
+        fi
+
+        if [ ! -d "$REPO_ROOT/.venv" ]; then
+          echo "[agents_fleet] Creating Python virtual environment (.venv) with Python $PYTHON_VERSION..."
+          if ! "$PYTHON_CMD" -m venv "$REPO_ROOT/.venv"; then
+            echo "[agents_fleet] ERROR: Failed to create virtual environment"
+            echo "[agents_fleet] Skipping headroom setup"
+            return
+          fi
+        fi
+
+        # Use venv's pip
+        VENV_PIP="$REPO_ROOT/.venv/bin/pip"
+
+        echo "[agents_fleet] Installing headroom dependencies from requirements.txt..."
+        INSTALL_LOG=$(mktemp)
+
+        if "$VENV_PIP" install -r "$REPO_ROOT/requirements.txt" >"$INSTALL_LOG" 2>&1; then
+          echo "[agents_fleet] ✓ headroom dependencies installed successfully"
+          # Update HEADROOM_CMD to use venv version
+          HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
+          ensure_kompress_model
+          launch_headroom
+        else
+          echo ""
+          echo "[agents_fleet] ERROR: pip install failed"
+          echo "[agents_fleet] Error output:"
+          cat "$INSTALL_LOG" | sed 's/^/  /'
+          echo ""
+          printf "%s" "[agents_fleet] Retry? [y/N]: "
+          if [ -r /dev/tty ]; then
+            read -r retry_answer </dev/tty || retry_answer="n"
+          else
+            read -r retry_answer || retry_answer="n"
+          fi
+
+          case "$retry_answer" in
+            [yY]*)
+              if "$VENV_PIP" install --upgrade pip >/dev/null 2>&1; then
+                if "$VENV_PIP" install "headroom-ai" "httpx[http2]" >"$INSTALL_LOG" 2>&1; then
+                  echo "[agents_fleet] ✓ headroom-ai installed successfully"
+                  HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
+                  ensure_kompress_model
+                  launch_headroom
+                else
+                  echo "[agents_fleet] Installation failed again. Skipping headroom setup"
+                fi
+              fi
+              ;;
+            *)
+              echo ""
+              echo "[agents_fleet] To install manually:"
+              echo "  source .venv/bin/activate"
+              echo "  pip install headroom-ai httpx[http2]"
+              echo ""
+              echo "[agents_fleet] Skipping headroom setup"
+              ;;
+          esac
+        fi
+
+        rm -f "$INSTALL_LOG"
         ;;
     esac
   fi

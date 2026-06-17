@@ -51,6 +51,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const command = body?.command;
     const budgetUsd = body?.budgetUsd;
     const budgetTokens = body?.budgetTokens;
+    const headroom = body?.headroom === true;
     if (typeof repoPath !== "string" || repoPath.trim().length === 0) {
       return jsonError(res, 400, "repoPath is required");
     }
@@ -79,6 +80,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const id = crypto.randomUUID();
     const createdAt = nowIso();
     const status: Session["status"] = "running";
+    const storedCommand = headroom ? `[headroom-shell]:${command.trim()}` : command.trim();
 
     const db = getDb();
     db.prepare(
@@ -100,7 +102,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       id,
       createdAt,
       status,
-      command,
+      storedCommand,
       repoPath,
       budgetUsd ?? null,
       budgetTokens ?? null,
@@ -108,7 +110,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
 
     // Spawn after session row exists so logs can be appended.
     try {
-      processManager.spawnSession({ sessionId: id, repoPath, command: command.trim() });
+      processManager.spawnSession({ sessionId: id, repoPath, command: command.trim(), headroom });
     } catch (e) {
       db.prepare(
         "UPDATE sessions SET status = ?, ended_at = ?, stop_reason = ? WHERE id = ?",

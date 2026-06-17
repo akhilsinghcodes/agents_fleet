@@ -14,8 +14,10 @@ import {
     getDashboardByModel,
     getDashboardByRepo,
     getDashboardStats,
+    getHeadroomRequests,
     getHeadroomStats,
     getLiteLLMSpend,
+    type HeadroomRequestRow,
     type HeadroomStatsResponse,
     type LiteLLMDailyActivity,
     type LiteLLMSpendLog,
@@ -110,19 +112,49 @@ function statusChipSx(status: string) {
 // ── Date range helpers ────────────────────────────────────────────────────────
 
 function toDateStr(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-type Preset = "today" | "week" | "month" | "ytd" | "custom";
+// UTC-based date string — used for week presets so they align with LiteLLM's
+// Monday 00:00 UTC budget reset boundary.
+function toUTCDateStr(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// Returns the UTC Monday that starts the current LiteLLM budget week.
+function utcWeekStart(now: Date): Date {
+  const utcDay = now.getUTCDay(); // 0=Sun
+  const daysFromMonday = utcDay === 0 ? 6 : utcDay - 1;
+  const d = new Date(now);
+  d.setUTCDate(now.getUTCDate() - daysFromMonday);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+type Preset = "today" | "this_week" | "last_week" | "month" | "ytd" | "custom";
 
 function presetRange(preset: Preset): { from: string; to: string } {
   const now = new Date();
   const today = toDateStr(now);
+
   if (preset === "today") return { from: today, to: today };
-  if (preset === "week") {
-    const w = new Date(now);
-    w.setDate(now.getDate() - 6);
-    return { from: toDateStr(w), to: today };
+  if (preset === "this_week") {
+    const ws = utcWeekStart(now);
+    return { from: toUTCDateStr(ws), to: toUTCDateStr(now) };
+  }
+  if (preset === "last_week") {
+    const thisWeekStart = utcWeekStart(now);
+    const lastWeekEnd = new Date(thisWeekStart);
+    lastWeekEnd.setUTCDate(thisWeekStart.getUTCDate() - 1);
+    const lastWeekStart = new Date(lastWeekEnd);
+    lastWeekStart.setUTCDate(lastWeekEnd.getUTCDate() - 6);
+    return { from: toUTCDateStr(lastWeekStart), to: toUTCDateStr(lastWeekEnd) };
   }
   if (preset === "month") {
     return {
@@ -854,7 +886,8 @@ function DashboardHeader({
 }) {
   const presets: { key: Preset; label: string }[] = [
     { key: "today", label: "Today" },
-    { key: "week", label: "7 Days" },
+    { key: "this_week", label: "This Week" },
+    { key: "last_week", label: "Last Week" },
     { key: "month", label: "Month" },
     { key: "ytd", label: "YTD" },
     { key: "custom", label: "Custom" },
@@ -869,7 +902,7 @@ function DashboardHeader({
         </Typography>
         {stats && (
           <Typography variant="body2" color="text.secondary">
-            {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
+            {new Date(`${from}T00:00:00`).toLocaleDateString()} – {new Date(`${to}T00:00:00`).toLocaleDateString()}
           </Typography>
         )}
       </Box>
@@ -1107,7 +1140,8 @@ function LiteLLMTab({
 
   const presets: { key: Preset; label: string }[] = [
     { key: "today", label: "Today" },
-    { key: "week", label: "7 Days" },
+    { key: "this_week", label: "This Week" },
+    { key: "last_week", label: "Last Week" },
     { key: "month", label: "Month" },
     { key: "ytd", label: "YTD" },
   ];
@@ -1121,7 +1155,7 @@ function LiteLLMTab({
             <Box display="flex" alignItems="center" gap={1.5} mb={2}>
               <Typography variant="h6" fontWeight={700}>Spend Analytics</Typography>
               <Typography variant="body2" color="text.secondary">
-                {new Date(from).toLocaleDateString()} – {new Date(to).toLocaleDateString()}
+                {new Date(`${from}T00:00:00`).toLocaleDateString()} – {new Date(`${to}T00:00:00`).toLocaleDateString()}
               </Typography>
             </Box>
             <Box display="flex" alignItems="center" gap={1} mb={2}>
@@ -1155,7 +1189,7 @@ function LiteLLMTab({
                   }} axisLine={false} tickLine={false} />
                   <YAxis hide />
                   <RechartsTooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Spend"]}
-                    labelFormatter={(l: string) => new Date(l).toLocaleDateString()} />
+                    labelFormatter={(l: string) => new Date(`${l}T00:00:00`).toLocaleDateString()} />
                   <Bar dataKey="spend" fill="#6366f1" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -1168,11 +1202,13 @@ function LiteLLMTab({
       {data && dailyResults.length > 0 && (() => {
         const WEEKLY_BUDGET = 200;
         const now = new Date();
-        // Week starts Sunday (getDay() === 0)
-        const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
-        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+        // Week = Monday 00:00 UTC → Sunday 23:59 UTC, matching LiteLLM's reset boundary
+        const weekStart = utcWeekStart(now);
+        const weekEnd = new Date(weekStart); weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+        const weekStartStr = toUTCDateStr(weekStart);
+        const weekEndStr = toUTCDateStr(weekEnd);
         const daysElapsed = Math.min(7, Math.max(1, Math.floor((now.getTime() - weekStart.getTime()) / 86400000) + 1));
-        const weekSpend = dailyResults.filter(r => r.date >= weekStart.toISOString().slice(0,10) && r.date <= weekEnd.toISOString().slice(0,10))
+        const weekSpend = dailyResults.filter(r => r.date >= weekStartStr && r.date <= weekEndStr)
           .reduce((s, r) => s + r.metrics.spend, 0);
         const dailyAvg = weekSpend / daysElapsed;
         const projected = dailyAvg * 7;
@@ -1185,7 +1221,7 @@ function LiteLLMTab({
             <Box>
               <Typography fontWeight={600} fontSize={13}>Weekly Budget</Typography>
               <Typography variant="caption" color="text.secondary">
-                {daysElapsed} of 7 days · {weekStart.toISOString().slice(0,10)} – {weekEnd.toISOString().slice(0,10)}
+                {daysElapsed} of 7 days · {weekStartStr} – {weekEndStr}
               </Typography>
             </Box>
             <Box>
@@ -1338,10 +1374,111 @@ function LiteLLMContent({ modelRows, dailyResults, totalSpend }: {
 type DashTab = "by_repo" | "by_command" | "by_model";
 
 
+function HeadroomRequestsTable() {
+  const [rows, setRows] = useState<HeadroomRequestRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    getHeadroomRequests(500)
+      .then((r) => { setRows(r); setLoading(false); })
+      .catch((e) => { setError(String(e)); setLoading(false); });
+  }, []);
+
+  if (loading) return <Typography p={2.5} fontSize={13} color="text.secondary">Loading…</Typography>;
+  if (error) return <Typography p={2.5} fontSize={13} color="error">{error}</Typography>;
+  if (rows.length === 0) return (
+    <Typography p={2.5} fontSize={13} color="text.secondary">
+      No requests logged yet. Requests will appear here after headroom proxies its first LLM call.
+    </Typography>
+  );
+
+  return (
+    <Box sx={{ overflow: "auto", flex: 1 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+        <thead>
+          <tr style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+            {["Timestamp", "Model", "Provider", "In (orig)", "In (opt)", "Saved", "Savings %", "Out", "Latency", "Cache", "Status"].map((h) => (
+              <th key={h} style={{ padding: "6px 10px", textAlign: "left", borderBottom: "1px solid #e2e8f0", fontWeight: 600, fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const ts = new Date(row.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            const saved = row.tokens_saved > 0;
+            return (
+              <tr key={row.request_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                <td style={{ padding: "5px 10px", color: "#64748b", whiteSpace: "nowrap" }}>{ts}</td>
+                <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}>{row.model}</td>
+                <td style={{ padding: "5px 10px", color: "#64748b" }}>{row.provider}</td>
+                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.input_tokens_original.toLocaleString()}</td>
+                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.input_tokens_optimized.toLocaleString()}</td>
+                <td style={{ padding: "5px 10px", textAlign: "right", color: saved ? "#16a34a" : "#94a3b8", fontWeight: saved ? 600 : 400 }}>
+                  {saved ? `−${row.tokens_saved.toLocaleString()}` : "—"}
+                </td>
+                <td style={{ padding: "5px 10px", textAlign: "right", color: saved ? "#16a34a" : "#94a3b8" }}>
+                  {saved ? `${row.savings_percent.toFixed(1)}%` : "—"}
+                </td>
+                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.output_tokens.toLocaleString()}</td>
+                <td style={{ padding: "5px 10px", textAlign: "right", color: "#64748b" }}>{row.total_latency_ms.toFixed(0)}ms</td>
+                <td style={{ padding: "5px 10px", textAlign: "center" }}>{row.cache_hit ? <span style={{ color: "#2563eb" }}>✓</span> : "—"}</td>
+                <td style={{ padding: "5px 10px" }}>
+                  {row.error
+                    ? <span style={{ color: "#dc2626" }}>error</span>
+                    : <span style={{ color: "#16a34a" }}>ok</span>
+                  }
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Box>
+  );
+}
+
+function HeadroomSection() {
+  const [tab, setTab] = useState<"dashboard" | "requests">("dashboard");
+
+  return (
+    <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      {/* Subtab bar */}
+      <Box sx={{ display: "flex", gap: 0.25, px: 2, py: 0.75, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+        {(["dashboard", "requests"] as const).map((key) => (
+          <Box
+            key={key}
+            onClick={() => setTab(key)}
+            sx={{
+              px: 1.5, py: 0.5, borderRadius: 1, fontSize: 13, fontWeight: tab === key ? 600 : 400,
+              color: tab === key ? "primary.main" : "text.secondary",
+              bgcolor: tab === key ? "primary.50" : "transparent",
+              cursor: "pointer", textTransform: "capitalize",
+              "&:hover": { bgcolor: tab === key ? "primary.50" : "action.hover" },
+            }}
+          >
+            {key === "dashboard" ? "Headroom Dashboard" : "Request Log"}
+          </Box>
+        ))}
+      </Box>
+
+      {tab === "dashboard" && (
+        <iframe
+          src="http://localhost:8787/dashboard"
+          style={{ flex: 1, border: "none", width: "100%", height: "100%" }}
+          title="Headroom Dashboard"
+        />
+      )}
+      {tab === "requests" && <HeadroomRequestsTable />}
+    </Box>
+  );
+}
+
 export function DashboardContent() {
   const [mainTab, setMainTab] = useState<"agents_fleet" | "litellm" | "headroom">("agents_fleet");
   const [tab, setTab] = useState<DashTab>("by_repo");
-  const [preset, setPreset] = useState<Preset>("week");
+  const [preset, setPreset] = useState<Preset>("this_week");
   const [customFrom, setCustomFrom] = useState(() => toDateStr(new Date()));
   const [customTo, setCustomTo] = useState(() => toDateStr(new Date()));
 
@@ -1426,9 +1563,7 @@ export function DashboardContent() {
       )}
 
       {mainTab === "headroom" && (
-        <Box sx={{ flex: 1, overflow: "auto" }}>
-          <HeadroomCard />
-        </Box>
+        <HeadroomSection />
       )}
 
       {/* Header: metrics (left) + weekly chart (right) — Agents Fleet only */}
