@@ -371,6 +371,55 @@ export type LiteLLMDailyActivity = {
   }>;
 };
 
+export type HeadroomStatsResponse =
+  | { configured: false }
+  | {
+      configured: true;
+      health: {
+        status: string;
+        ready: boolean;
+        uptime_seconds: number;
+        version: string;
+      };
+      stats: {
+        summary?: {
+          api_requests: number;
+          compression?: {
+            total_tokens_removed: number;
+            avg_compression_pct: number;
+            requests_compressed: number;
+          };
+          cost?: {
+            without_headroom_usd: number;
+            with_headroom_usd: number;
+            total_saved_usd: number;
+            savings_pct: number;
+          };
+        };
+        persistent_savings?: {
+          lifetime?: {
+            requests: number;
+            tokens_saved: number;
+            compression_savings_usd: number;
+            total_input_tokens: number;
+          };
+          display_session?: {
+            requests: number;
+            tokens_saved: number;
+            savings_percent: number;
+            compression_savings_usd: number;
+          };
+        };
+      };
+    };
+
+export async function getHeadroomStats(proxyUrl: string): Promise<HeadroomStatsResponse> {
+  const res = await fetch(`/api/dashboard/headroom/stats?url=${encodeURIComponent(proxyUrl)}`);
+  const json = await parseJson<HeadroomStatsResponse | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as HeadroomStatsResponse;
+}
+
 export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLMSpendResponse> {
   const res = await fetch(`/api/dashboard/litellm/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
   const json = await parseJson<LiteLLMSpendResponse | ApiErrorShape>(res);

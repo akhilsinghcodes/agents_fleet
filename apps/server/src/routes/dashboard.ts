@@ -366,5 +366,37 @@ export function dashboardRouter(): Router {
     }
   });
 
+  /**
+   * GET /api/dashboard/headroom/stats?url=<proxyUrl>
+   * Proxies to {url}/health on the local headroom proxy and returns its stats.
+   * Returns { configured: false } if no url provided.
+   */
+  router.get("/dashboard/headroom/stats", async (req: Request, res: Response) => {
+    const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
+    if (!url) return res.json({ configured: false });
+
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({ error: { message: "Invalid headroom proxy URL" } });
+    }
+
+    try {
+      const base = url.replace(/\/$/, "");
+      const [healthRes, statsRes] = await Promise.all([
+        fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) }),
+        fetch(`${base}/stats`, { signal: AbortSignal.timeout(3000) }),
+      ]);
+      if (!healthRes.ok) {
+        return res.status(502).json({ error: { message: `Headroom proxy returned ${healthRes.status}` } });
+      }
+      const health = await healthRes.json() as Record<string, unknown>;
+      const stats = statsRes.ok ? await statsRes.json() as Record<string, unknown> : {};
+      return res.json({ configured: true, health, stats });
+    } catch (e) {
+      return res.status(502).json({ error: { message: `Could not reach headroom proxy: ${String(e)}` } });
+    }
+  });
+
   return router;
 }
