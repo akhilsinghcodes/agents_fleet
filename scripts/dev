@@ -83,13 +83,10 @@ launch_headroom() {
     echo "[agents_fleet] Routing headroom -> LiteLLM at $LITELLM_BASE_URL"
   fi
   echo "[agents_fleet] Starting headroom proxy on port $HEADROOM_PORT..."
-  echo "[agents_fleet] Headroom config: HEADROOM_TELEMETRY=off, routing both Anthropic and OpenAI to LiteLLM"
   HEADROOM_TELEMETRY=off \
-  ANTHROPIC_TARGET_API_URL="${LITELLM_BASE_URL:-}" \
   OPENAI_TARGET_API_URL="${LITELLM_BASE_URL:-}" \
-  ANTHROPIC_API_KEY="${LITELLM_API_KEY:-}" \
   OPENAI_API_KEY="${LITELLM_API_KEY:-}" \
-  headroom proxy --port "$HEADROOM_PORT" --no-telemetry >"$REPO_ROOT/data/headroom.log" 2>&1 &
+  headroom proxy --port "$HEADROOM_PORT" >"$REPO_ROOT/data/headroom.log" 2>&1 &
   HEADROOM_PID=$!
 
   echo "[agents_fleet] Waiting for headroom proxy to be ready (first run downloads the model, may take a minute)..."
