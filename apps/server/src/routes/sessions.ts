@@ -167,14 +167,26 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const sessions = db
       .prepare(
         `SELECT
-          id, created_at, status, command, repo_path, pid, exit_code, ended_at,
-          budget_usd, budget_tokens,
-          estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
-          budget_exceeded_at, stop_reason
-        FROM sessions ORDER BY created_at DESC`,
+          s.id, s.created_at, s.status, s.command, s.repo_path, s.pid, s.exit_code, s.ended_at,
+          s.budget_usd, s.budget_tokens,
+          s.estimated_input_tokens, s.estimated_output_tokens, s.estimated_cost_usd,
+          s.budget_exceeded_at, s.stop_reason,
+          sa.content AS summary_content
+        FROM sessions s
+        LEFT JOIN session_artifacts sa
+          ON sa.session_id = s.id AND sa.kind = 'session_summary'
+        ORDER BY s.created_at DESC`,
       )
-      .all() as Session[];
-    res.json({ sessions });
+      .all() as (Session & { summary_content?: string })[];
+
+    const sessionsWithTitle = sessions.map(({ summary_content, ...s }) => {
+      let session_title: string | null = null;
+      if (summary_content) {
+        try { session_title = (JSON.parse(summary_content) as { title?: string }).title ?? null; } catch {}
+      }
+      return { ...s, session_title };
+    });
+    res.json({ sessions: sessionsWithTitle });
   });
 
   /**
@@ -309,6 +321,130 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       .all(id, kind, kind, limit, offset) as SessionArtifact[];
 
     return res.json({ artifacts, limit, offset });
+  });
+
+  /**
+   * POST /api/sessions/:id/summary
+   * Generates a title + summary using gpt-4o-mini via LiteLLM.
+   */
+  router.post("/sessions/:id/summary", async (req, res) => {
+    const id = req.params.id;
+    const db = getDb();
+    const session = db
+      .prepare("SELECT id, repo_path, command, estimated_input_tokens, estimated_output_tokens, estimated_cost_usd FROM sessions WHERE id = ? LIMIT 1")
+      .get(id) as { id: string; repo_path: string; command: string; estimated_input_tokens: number | null; estimated_output_tokens: number | null; estimated_cost_usd: number | null } | undefined;
+    if (!session) return jsonError(res, 404, "Session not found");
+
+    const baseUrl = process.env.LITELLM_BASE_URL?.replace(/\/$/, "");
+    const apiKey = process.env.LITELLM_API_KEY;
+    if (!baseUrl || !apiKey)
+      return jsonError(res, 503, "LITELLM_BASE_URL and LITELLM_API_KEY are required");
+
+    const artifact = db
+      .prepare(
+        `SELECT content FROM session_artifacts
+         WHERE session_id = ? AND kind IN ('git_on_stop','git_on_exit')
+         ORDER BY timestamp DESC LIMIT 1`,
+      )
+      .get(id) as { content: string } | undefined;
+
+    let diffText = "";
+    if (artifact) {
+      try {
+        const parsed = JSON.parse(artifact.content) as { diff?: string; changedFiles?: string[] };
+        if (parsed.diff) diffText = parsed.diff.slice(0, 3000);
+      } catch {}
+    }
+
+    const stdinRows = db
+      .prepare(`SELECT data FROM stdin_events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 200`)
+      .all(id) as { data: string }[];
+    const stdinText = stdinRows
+      .map((r) => r.data)
+      .join("")
+      .replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, "")
+      .replace(/\x1b<[^M]*M/g, "")
+      .replace(/\x1b[^[]/g, "")
+      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+      .trim()
+      .slice(0, 2000);
+
+    const prompt = `You are summarizing an AI coding agent session.
+
+Repo: ${session.repo_path}
+Command: ${session.command}
+
+${stdinText ? `User inputs during session:\n${stdinText}\n` : ""}
+${diffText ? `Git diff (what changed):\n${diffText}` : "No git diff available."}
+
+Respond with JSON only, no markdown:
+{
+  "title": "short title (max 8 words)",
+  "summary": "2-3 sentence plain English summary of what happened in this session"
+}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+          max_tokens: 300,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        return jsonError(res, 502, `LiteLLM error: ${err.slice(0, 200)}`);
+      }
+
+      const data = await response.json() as { choices: { message: { content: string } }[]; usage?: Record<string, unknown> };
+      const content = data.choices[0]?.message?.content ?? "";
+      if (!content) return jsonError(res, 502, "Model returned empty response — please try again");
+
+      const summaryInputTokens = (data.usage?.prompt_tokens as number) ?? 0;
+      const summaryOutputTokens = (data.usage?.completion_tokens as number) ?? 0;
+      const summaryTotalCost = (summaryInputTokens * 0.15 + summaryOutputTokens * 0.60) / 1_000_000;
+
+      let parsed: { title: string; summary: string };
+      try {
+        const cleaned = content.replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+        parsed = JSON.parse(cleaned) as { title: string; summary: string };
+      } catch {
+        return jsonError(res, 502, `Model returned invalid JSON: ${content.slice(0, 200)}`);
+      }
+
+      const existingArtifact = db
+        .prepare("SELECT id FROM session_artifacts WHERE session_id = ? AND kind = 'session_summary' LIMIT 1")
+        .get(id) as { id: string } | undefined;
+
+      const summaryContent = JSON.stringify({
+        title: parsed.title,
+        summary: parsed.summary,
+        input_tokens: summaryInputTokens,
+        output_tokens: summaryOutputTokens,
+        cost_usd: summaryTotalCost,
+      });
+      if (existingArtifact) {
+        db.prepare("UPDATE session_artifacts SET content = ?, timestamp = ? WHERE id = ?")
+          .run(summaryContent, nowIso(), existingArtifact.id);
+      } else {
+        db.prepare("INSERT INTO session_artifacts (id, session_id, timestamp, kind, content) VALUES (?,?,?,?,?)")
+          .run(crypto.randomUUID(), id, nowIso(), "session_summary", summaryContent);
+      }
+
+      return res.json({
+        title: parsed.title,
+        summary: parsed.summary,
+        input_tokens: summaryInputTokens,
+        output_tokens: summaryOutputTokens,
+        cost_usd: summaryTotalCost,
+      });
+    } catch (e) {
+      return jsonError(res, 500, String(e));
+    }
   });
 
   /**

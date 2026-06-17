@@ -16,6 +16,7 @@ export type Session = {
   estimated_cost_usd: number;
   budget_exceeded_at: string | null;
   stop_reason: string | null;
+  session_title: string | null;
 };
 
 export type LogStream = "stdout" | "stderr" | "system";

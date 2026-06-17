@@ -11,7 +11,12 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
-- **Headroom integration** (latest)
+- **AI session summary** (latest)
+  - One-click plain-English summary of any session — title, what the agent did, and token/cost breakdown for the summary call
+  - Powered by `gpt-4o-mini` via your LiteLLM proxy — under $0.001 per summary
+  - Summary persisted in SQLite and surfaced as a top-level artifact alongside git diff
+  - Generated session title appears in the sessions sidebar for quick scanning
+- **Headroom integration**
   - New **Headroom** tab: LiteLLM chat with transparent context compression via the headroom proxy — same model/budget controls as LiteLLM, compression is automatic
   - ~19% token reduction observed on first real session (948 tokens saved out of 4,901 input)
   - Proxy starts automatically with `pnpm dev:one` — installs `headroom-ai` via pip on first run, polls until ready before starting the app
@@ -117,11 +122,18 @@ This repository contains a **working MVP**:
 
 ![Claude SDK history](screenshots/litellm_chat_History.png)
 
-**Per-session artifacts (git diff snapshots)**
+**Per-session artifacts (git diff snapshots + AI summary)**
 
 - Git diff viewer (side-by-side, file tabs)
 
 
+
+- Session summary — AI-generated title, description, and token/cost breakdown
+
+
+- Session summary live — sidebar titles, artifacts tab, and Regenerate button
+
+![Session summary live](screenshots/Session_Summary_Live.png)
 
 **Spend dashboards / budget tracking**
 
@@ -236,7 +248,7 @@ The MVP persists several tables in `data/agents_fleet.sqlite`:
 - `pty_chunks`: raw PTY stream (ANSI included) used for **Terminal (persisted)** replay
 - `stdin_events`: input audit trail (stored separately; not injected into replay)
 - `session_markers`: lifecycle markers like `stop_requested`, `budget_exceeded`, `process_exit`
-- `session_artifacts`: per-session artifacts (currently: git snapshot with `changedFiles[]` + combined staged/unstaged `diff` captured on stop/exit)
+- `session_artifacts`: per-session artifacts — git snapshot (`changedFiles[]` + diff captured on stop/exit), session resume command, and AI-generated summary (title + description via gpt-4o-mini)
 
 > Earlier iterations used a line-based `logs` table. The current design persists terminal history as raw PTY chunks (`pty_chunks`) for xterm.js replay, which is much closer to real scrollback (especially for TUIs like Claude/Codex).
 
