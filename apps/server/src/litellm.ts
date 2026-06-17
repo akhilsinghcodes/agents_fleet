@@ -209,6 +209,7 @@ export function requireLiteLlmConfig(): { baseUrl: string; apiKey: string } {
 export type LiteLlmConfigV1 = {
   v: 1;
   model: string;
+  headroomBaseUrl?: string;
 };
 
 export type LiteLlmMessageV1 = {
@@ -331,8 +332,8 @@ export function assertLiteLlmSession(sessionId: string): Session {
     )
     .get(sessionId) as Session | undefined;
   if (!row) throw new Error("Session not found");
-  if (!row.command.startsWith("[litellm-chat]")) {
-    throw new Error("Not a litellm-chat session");
+  if (!row.command.startsWith("[litellm-chat]") && !row.command.startsWith("[headroom-chat]")) {
+    throw new Error("Not a litellm-chat or headroom-chat session");
   }
   return row;
 }
@@ -499,7 +500,8 @@ async function callLiteLlm(args: {
   toolCalls: LiteLlmToolCall[];
   usage: LiteLlmUsageSnapshotV1 | null;
 }> {
-  const endpoint = new URL("/chat/completions", args.baseUrl);
+  const base = args.baseUrl.endsWith("/") ? args.baseUrl : args.baseUrl + "/";
+  const endpoint = new URL("chat/completions", base);
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -570,7 +572,8 @@ export async function runLiteLlmTurn(args: {
   }>;
 }) {
   const cfg = loadLiteLlmConfig(args.sessionId);
-  const { baseUrl, apiKey } = requireLiteLlmConfig();
+  const { baseUrl: envBaseUrl, apiKey } = requireLiteLlmConfig();
+  const baseUrl = cfg.headroomBaseUrl ?? envBaseUrl;
 
   // Build message history including the new user turn.
   const messages: LiteLlmModelMessage[] = [
