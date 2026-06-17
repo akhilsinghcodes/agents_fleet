@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Session, SessionArtifact } from "@agents_fleet/shared";
 import GitDiffViewer from "./GitDiffViewer";
+import { generateSessionSummary, type SessionSummary } from "./api";
 
 type GitArtifactV1 = {
   v: 1;
@@ -142,6 +143,122 @@ function ResumeArtifact({ command, repoPath, onResume }: {
       </div>
       {resumeError && (
         <div style={{ fontSize: 12, color: "#b91c1c" }}>{resumeError}</div>
+      )}
+    </div>
+  );
+}
+
+const MONO: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+};
+
+function GitArtifactView({ parsed }: { parsed: GitArtifactV1 }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div>
+        <div style={{ fontWeight: 700 }}>Git snapshot</div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>repo: {parsed.repoPath}</div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>head: {parsed.head ?? "(unknown)"}</div>
+      </div>
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Changed files ({parsed.changedFiles.length})</div>
+        {parsed.changedFiles.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#6b7280" }}>None</div>
+        ) : (
+          <div style={{ display: "grid", gap: 3 }}>
+            {parsed.changedFiles.map((f) => {
+              const m = f.match(/^([MADRCU?!]+)\s+(.+)$/);
+              const status = m ? m[1] : null;
+              const path = m ? m[2] : f;
+              const statusColor =
+                status === "A" ? "#15803d" :
+                status === "D" ? "#dc2626" :
+                status === "M" ? "#d97706" :
+                status === "R" ? "#0891b2" : "#6b7280";
+              return (
+                <div key={f} style={{ display: "flex", alignItems: "baseline", gap: 6, ...MONO, fontSize: 12 }}>
+                  {status && <span style={{ fontWeight: 700, color: statusColor, minWidth: 14, flexShrink: 0 }}>{status}</span>}
+                  <span style={{ color: "#374151" }}>{path}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {parsed.diff
+        ? <GitDiffViewer diff={parsed.diff} changedFiles={parsed.changedFiles} />
+        : <div style={{ fontSize: 12, color: "#6b7280" }}>git diff unavailable</div>
+      }
+    </div>
+  );
+}
+
+function SummaryArtifact({ sessionId, existingContent }: { sessionId: string; existingContent: string | null }) {
+  const existing = (() => {
+    if (!existingContent) return null;
+    try { return JSON.parse(existingContent) as SessionSummary; } catch { return null; }
+  })();
+
+  const [summary, setSummary] = useState<SessionSummary | null>(existing);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const generate = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await generateSessionSummary(sessionId);
+      setSummary(result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ fontWeight: 700 }}>Session Summary</div>
+      {!summary && !loading && (
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            Generate a title and plain-English summary of this session using gpt-4o-mini via your LiteLLM proxy.
+          </div>
+          <button
+            onClick={() => void generate()}
+            style={{ alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8, border: "1px solid #111827", background: "#111827", color: "white", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+          >
+            ✦ Generate Summary
+          </button>
+        </div>
+      )}
+      {loading && <div style={{ fontSize: 12, color: "#6b7280" }}>Generating…</div>}
+      {error && <div style={{ fontSize: 12, color: "#b91c1c" }}>{error}</div>}
+      {summary && (
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{summary.title}</div>
+          <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>{summary.summary}</div>
+          {(summary.input_tokens != null || summary.output_tokens != null || summary.cost_usd != null) && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              {(summary.input_tokens ?? 0) > 0 && (
+                <div style={{ fontSize: 12 }}><span style={{ color: "#9ca3af" }}>in </span><span style={{ fontWeight: 600 }}>{summary.input_tokens!.toLocaleString()}</span></div>
+              )}
+              {(summary.output_tokens ?? 0) > 0 && (
+                <div style={{ fontSize: 12 }}><span style={{ color: "#9ca3af" }}>out </span><span style={{ fontWeight: 600 }}>{summary.output_tokens!.toLocaleString()}</span></div>
+              )}
+              {(summary.cost_usd ?? 0) > 0 && (
+                <div style={{ fontSize: 12 }}><span style={{ color: "#9ca3af" }}>cost </span><span style={{ fontWeight: 600 }}>${summary.cost_usd! < 0.001 ? summary.cost_usd!.toFixed(6) : summary.cost_usd!.toFixed(4)}</span></div>
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => void generate()}
+            disabled={loading}
+            style={{ alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8, border: "1px solid #111827", background: loading ? "#e5e7eb" : "#111827", color: loading ? "#6b7280" : "white", cursor: loading ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}
+          >
+            ✦ Regenerate
+          </button>
+        </div>
       )}
     </div>
   );
@@ -324,6 +441,29 @@ export default function SessionArtifacts({ sessionId, onResume }: Props) {
               </button>
             );
           })}
+          {/* Show summary entry if there are git artifacts but no summary yet */}
+          {artifacts.some(a => a.kind === "git_on_stop" || a.kind === "git_on_exit") &&
+           !artifacts.some(a => a.kind === "session_summary") && (() => {
+            const isSel = selectedId === "__summary__";
+            return (
+              <button
+                key="__summary__"
+                onClick={() => setSelectedId("__summary__")}
+                style={{
+                  width: "100%", textAlign: "left", padding: "8px 10px 8px 12px",
+                  border: "none", borderBottom: "1px solid #f3f4f6",
+                  borderLeft: isSel ? "3px solid #4f46e5" : "3px solid transparent",
+                  background: isSel ? "#f0f0ff" : "white",
+                  cursor: "pointer", transition: "background 0.1s",
+                }}
+              >
+                <div style={{ fontSize: 11, color: "#9ca3af" }}>—</div>
+                <div style={{ fontWeight: 600, fontSize: 12, marginTop: 3, color: isSel ? "#4f46e5" : "#111827" }}>
+                  session_summary
+                </div>
+              </button>
+            );
+          })()}
         </div>
 
         <div
@@ -335,7 +475,9 @@ export default function SessionArtifacts({ sessionId, onResume }: Props) {
             background: "white",
           }}
         >
-          {selected
+          {selectedId === "__summary__"
+            ? <SummaryArtifact sessionId={sessionId} existingContent={null} />
+            : selected
             ? (() => {
                 if (selected.kind === "claude_resume" || selected.kind === "codex_resume") {
                   return (
@@ -347,82 +489,36 @@ export default function SessionArtifacts({ sessionId, onResume }: Props) {
                   );
                 }
 
+                if (selected.kind === "session_summary") {
+                  return (
+                    <SummaryArtifact
+                      sessionId={sessionId}
+                      existingContent={selected.content}
+                    />
+                  );
+                }
+
                 const parsed = tryParseGitArtifact(selected.content);
                 if (parsed) {
-                  return (
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <div>
-                        <div style={{ fontWeight: 700 }}>Git snapshot</div>
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>
-                          repo: {parsed.repoPath}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>
-                          head: {parsed.head ?? "(unknown)"}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                          Changed files ({parsed.changedFiles.length})
-                        </div>
-                        {parsed.changedFiles.length === 0 ? (
-                          <div style={{ fontSize: 12, color: "#6b7280" }}>
-                            None
-                          </div>
-                        ) : (
-                          <div style={{ display: "grid", gap: 3 }}>
-                            {parsed.changedFiles.map((f) => {
-                              const m = f.match(/^([MADRCU?!]+)\s+(.+)$/);
-                              const status = m ? m[1] : null;
-                              const path = m ? m[2] : f;
-                              const statusColor =
-                                status === "A" ? "#15803d" :
-                                status === "D" ? "#dc2626" :
-                                status === "M" ? "#d97706" :
-                                status === "R" ? "#0891b2" : "#6b7280";
-                              return (
-                                <div key={f} style={{ display: "flex", alignItems: "baseline", gap: 6, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace', fontSize: 12 }}>
-                                  {status && (
-                                    <span style={{ fontWeight: 700, color: statusColor, minWidth: 14, flexShrink: 0 }}>{status}</span>
-                                  )}
-                                  <span style={{ color: "#374151" }}>{path}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {parsed.diff ? (
-                        <GitDiffViewer diff={parsed.diff} changedFiles={parsed.changedFiles} />
-                      ) : (
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>git diff unavailable</div>
-                      )}
-                    </div>
-                  );
+                  return <GitArtifactView parsed={parsed} />;
                 }
 
                 // Fallback: show raw content
                 return (
                   <pre
                     style={{
-                      margin: 0,
-                      padding: 10,
-                      borderRadius: 8,
-                      background: "#0b0f14",
-                      color: "#d6dde6",
-                      overflow: "auto",
-                      fontFamily:
-                        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      fontSize: 12,
-                      whiteSpace: "pre",
+                      margin: 0, padding: 10, borderRadius: 8,
+                      background: "#0b0f14", color: "#d6dde6", overflow: "auto",
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                      fontSize: 12, whiteSpace: "pre",
                     }}
                   >
                     {selected.content}
                   </pre>
                 );
               })()
-            : "Select an artifact to view."}
+            : "Select an artifact to view."
+          }
         </div>
       </div>
     </div>

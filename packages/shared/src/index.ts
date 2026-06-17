@@ -16,6 +16,7 @@ export type Session = {
   estimated_cost_usd: number;
   budget_exceeded_at: string | null;
   stop_reason: string | null;
+  session_title: string | null;
 };
 
 export type LogStream = "stdout" | "stderr" | "system";
@@ -41,6 +42,7 @@ export type CreateSessionRequest = {
   command: string;
   budgetUsd?: number;
   budgetTokens?: number;
+  headroom?: boolean;
 };
 
 export type CreateClaudeSdkSessionRequest = {
@@ -63,6 +65,7 @@ export type CreateLiteLlmSessionRequest = {
   model: string;
   budgetUsd?: number;
   budgetTokens?: number;
+  headroomBaseUrl?: string;
 };
 
 export type ApiError = {
