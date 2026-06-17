@@ -63,6 +63,7 @@ export type CreateLiteLlmSessionRequest = {
   model: string;
   budgetUsd?: number;
   budgetTokens?: number;
+  headroomBaseUrl?: string;
 };
 
 export type ApiError = {

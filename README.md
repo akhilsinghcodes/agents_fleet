@@ -11,7 +11,15 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
-- **LiteLLM Spend Analytics tab** (latest)
+- **Headroom integration** (latest)
+  - New **Headroom** tab: LiteLLM chat with transparent context compression via the headroom proxy — same model/budget controls as LiteLLM, compression is automatic
+  - ~19% token reduction observed on first real session (948 tokens saved out of 4,901 input)
+  - Proxy starts automatically with `pnpm dev:one` — installs `headroom-ai` via pip on first run, polls until ready before starting the app
+  - All LLM calls route through `http://localhost:8787/v1` → your `LITELLM_BASE_URL` — no external endpoints called directly
+  - Telemetry disabled (`HEADROOM_TELEMETRY=off`), HuggingFace offline after first model download (`HF_HUB_OFFLINE=1`)
+  - **Spend Analytics → Headroom tab**: lifetime + per-session compression stats (tokens saved, savings %, cost saved) pulled from the proxy's `/stats` endpoint — persists across restarts via `~/.headroom/proxy_savings.json`
+  - Sessions tagged with purple **Headroom** chip in sidebar, distinguished from regular LiteLLM sessions
+- **LiteLLM Spend Analytics tab**
   - Real spend data pulled from your LiteLLM proxy (`/spend/logs`, `/user/daily/activity`)
   - Matches Agents Fleet layout: header stats, This Week chart, Weekly Budget strip, By Model and Daily tabs
   - Weekly budget resets Sunday; projects spend and flags over-budget
@@ -151,6 +159,20 @@ This repository contains a **working MVP**:
 
 ![Session resume terminal](screenshots/Session_Resume_Terminal.png)
 
+**Headroom — context compression**
+
+- Headroom chat tab (proxy connected)
+
+![Headroom chat tab](screenshots/Headroom_Chat.png)
+
+- Headroom spend analytics card (tokens saved, savings %)
+
+![Headroom spend analytics](screenshots/Headroom_Spend_Analytics.png)
+
+- Headroom vs LiteLLM token comparison
+
+![Headroom vs LiteLLM token comparison](screenshots/Headroom_vs_LiteLLM.png)
+
 **LiteLLM Spend Analytics**
 
 - By Model tab — real spend breakdown from proxy
@@ -229,6 +251,7 @@ On first run, this may optionally prompt you for `ANTHROPIC_API_KEY` and save it
 **Environment variables:**
 - `ANTHROPIC_API_KEY` (required for Claude SDK chat)
 - `LITELLM_BASE_URL` and `LITELLM_API_KEY` (optional for LiteLLM Chat via enterprise proxy)
+- `HEADROOM_PORT` (optional, default `8787`) — port for the headroom proxy
 
 This will:
 - install dependencies (if needed)
@@ -373,6 +396,28 @@ export LITELLM_API_KEY="your-api-key"
 
 **Enterprise/Custom LLM Integration:**
 If you're running a local or enterprise LiteLLM proxy, Agents Fleet will route all requests through your infrastructure, giving you full control and visibility over API costs and usage.
+
+### Headroom Chat (context compression)
+Headroom is a transparent context compression proxy that reduces tokens sent to your LLM by 15–95% depending on context size, with no code changes required.
+
+**Setup:** `pnpm dev:one` handles everything automatically:
+- Installs `headroom-ai` via pip if not present (prompts once)
+- Downloads the `kompress-base` compression model from HuggingFace (one-time, ~first run)
+- Starts the proxy on `http://localhost:8787` before the app
+- Routes all Headroom tab calls through the proxy → your `LITELLM_BASE_URL`
+
+**Usage:**
+1. Switch to the **Headroom** tab
+2. Provide a repo path and select a model — same as LiteLLM
+3. Chat normally — compression is transparent
+4. View savings in **Spend Analytics → Headroom** tab
+
+**Notes:**
+- Requires Python + pip for headroom proxy installation
+- Compression kicks in when context exceeds 500 tokens (configurable via `HEADROOM_COMPRESSION_STABLE_AFTER_TURN`)
+- Sessions are tagged `[headroom-chat]` and show a purple **Headroom** chip in the sidebar
+- Proxy logs: `data/headroom.log`
+- Port override: `HEADROOM_PORT=9000 pnpm dev:one`
 
 ## Budgets (estimated)
 - Optional `Budget USD` and/or `Budget tokens` apply to the entire session lifetime.

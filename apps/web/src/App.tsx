@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createSession, deleteSession, listSessions, stopSession } from "./api";
 import ClaudeSdkChat from "./ClaudeSdkChat";
 import { DashboardContent } from "./Dashboard";
+import HeadroomChat from "./HeadroomChat";
 import LiteLLMChat from "./LiteLLMChat";
 import SessionArtifacts from "./SessionArtifacts";
 import TerminalPane from "./TerminalPane";
@@ -32,7 +33,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm" | "dashboard";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom" | "dashboard";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -62,6 +63,8 @@ function CommandBadge({ command }: { command: string }) {
     return <Chip label="Claude SDK" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#6d28d9", border: "none" }} />;
   if (command === "[litellm-chat]")
     return <Chip label="LiteLLM" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ccfbf1", color: "#0f766e", border: "none" }} />;
+  if (command === "[headroom-chat]")
+    return <Chip label="Headroom" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#ede9fe", color: "#7c3aed", border: "none" }} />;
   return <Chip label="Shell" size="small" sx={{ height: 17, fontSize: 10, fontWeight: 700, bgcolor: "#e2e8f0", color: "#334155", border: "none" }} />;
 }
 
@@ -239,6 +242,7 @@ function MainApp() {
   const [centerTab, setCenterTab] = useState<CenterTab>("terminal");
   const [claudeDraftNonce, setClaudeDraftNonce] = useState(0);
   const [liteLlmDraftNonce, setLiteLlmDraftNonce] = useState(0);
+  const [headroomDraftNonce, setHeadroomDraftNonce] = useState(0);
   const [showAllSessions, setShowAllSessions] = useState(false);
 
   // ── Session state ────────────────────────────────────────────────────────────
@@ -347,6 +351,7 @@ function MainApp() {
   function onSelectSession(s: Session) {
     if (s.command === "[claude-sdk]") setLeftTab("claude_sdk");
     else if (s.command === "[litellm-chat]") setLeftTab("litellm");
+    else if (s.command === "[headroom-chat]") setLeftTab("headroom");
     else setLeftTab("shell");
     setSelectedId(s.id);
   }
@@ -365,6 +370,7 @@ function MainApp() {
     { key: "shell", label: "Shell" },
     { key: "claude_sdk", label: "Claude (SDK)" },
     { key: "litellm", label: "LiteLLM" },
+    { key: "headroom", label: "Headroom" },
     { key: "dashboard", label: "Spend Analytics" },
   ];
 
@@ -380,7 +386,7 @@ function MainApp() {
       sx={{
         height: "100vh",
         display: "grid",
-        gridTemplateColumns: leftTab === "dashboard" ? "1fr" : "1fr 300px",
+        gridTemplateColumns: (leftTab === "dashboard") ? "1fr" : "1fr 300px",
         gridTemplateRows: "1fr",
         bgcolor: "background.default",
         overflow: "hidden",
@@ -450,7 +456,7 @@ function MainApp() {
           </ButtonGroup>
 
           {/* New chat ghost button */}
-          {(leftTab === "claude_sdk" || leftTab === "litellm") && (
+          {(leftTab === "claude_sdk" || leftTab === "litellm" || leftTab === "headroom") && (
             <Button
               size="small"
               variant="outlined"
@@ -458,6 +464,7 @@ function MainApp() {
               onClick={() => {
                 setSelectedId(null);
                 if (leftTab === "claude_sdk") setClaudeDraftNonce((n) => n + 1);
+                else if (leftTab === "headroom") setHeadroomDraftNonce((n) => n + 1);
                 else setLiteLlmDraftNonce((n) => n + 1);
               }}
               sx={{
@@ -501,6 +508,23 @@ function MainApp() {
               ) : (
                 <LiteLLMChat
                   key={`litellm-new-${liteLlmDraftNonce}`}
+                  mode="new"
+                  onCreated={(session) => {
+                    setError(null);
+                    refreshSessions(false).catch(() => undefined);
+                    setSelectedId(session.id);
+                    setCenterTab("artifacts");
+                  }}
+                />
+              )}
+            </Box>
+          ) : leftTab === "headroom" ? (
+            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
+              {selected && selected.command === "[headroom-chat]" ? (
+                <HeadroomChat mode="existing" sessionId={selected.id} />
+              ) : (
+                <HeadroomChat
+                  key={`headroom-new-${headroomDraftNonce}`}
                   mode="new"
                   onCreated={(session) => {
                     setError(null);

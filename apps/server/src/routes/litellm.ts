@@ -87,10 +87,15 @@ export function liteLlmRouter(_processManager: ProcessManager): Router {
       return jsonError(res, 400, `Invalid repoPath: ${String(e)}`);
     }
 
+    const headroomBaseUrl =
+      typeof body?.headroomBaseUrl === "string" && body.headroomBaseUrl.trim().length > 0
+        ? body.headroomBaseUrl.trim()
+        : undefined;
+
     const id = crypto.randomUUID();
     const createdAt = nowIso();
     const status: Session["status"] = "running";
-    const command = "[litellm-chat]";
+    const command = headroomBaseUrl ? "[headroom-chat]" : "[litellm-chat]";
     const db = getDb();
 
     db.prepare(
@@ -118,7 +123,7 @@ export function liteLlmRouter(_processManager: ProcessManager): Router {
       budgetTokens ?? null,
     );
 
-    storeLiteLlmConfig(id, { v: 1, model });
+    storeLiteLlmConfig(id, { v: 1, model, headroomBaseUrl });
 
     const session = db
       .prepare(
