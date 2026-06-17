@@ -208,6 +208,11 @@ function SessionsSidebar({
                   <Typography fontWeight={600} fontSize={13} mb={0.25} noWrap>
                     {s.command.startsWith("[headroom-shell]:") || s.command.startsWith("[headroom-shell]:") ? s.command.split(":").slice(1).join(":") : s.command}
                   </Typography>
+                  {s.session_title && (
+                    <Typography fontSize={11} fontWeight={500} color="text.primary" noWrap mb={0.25}>
+                      {s.session_title}
+                    </Typography>
+                  )}
                   <Typography fontSize={11} color="text.secondary" noWrap>
                     {s.repo_path}
                   </Typography>

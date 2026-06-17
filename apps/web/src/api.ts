@@ -450,3 +450,13 @@ export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLM
   if (isApiError(json)) throw new Error(json.error.message);
   return json as LiteLLMSpendResponse;
 }
+
+export type SessionSummary = { title: string; summary: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+
+export async function generateSessionSummary(sessionId: string): Promise<SessionSummary> {
+  const res = await fetch(`/api/sessions/${sessionId}/summary`, { method: "POST" });
+  const json = await parseJson<SessionSummary | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as SessionSummary;
+}
+
