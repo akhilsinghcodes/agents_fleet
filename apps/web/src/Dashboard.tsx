@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
     DashboardAlerts,
     DashboardCommandStat,
@@ -15,10 +15,8 @@ import {
     getDashboardByRepo,
     getDashboardStats,
     getHeadroomRequests,
-    getHeadroomStats,
     getLiteLLMSpend,
     type HeadroomRequestRow,
-    type HeadroomStatsResponse,
     type LiteLLMDailyActivity,
     type LiteLLMSpendLog,
 } from "./api";
@@ -992,105 +990,6 @@ function DashboardHeader({
         </Stack>
       )}
     </Box>
-  );
-}
-
-// ── Headroom Card ─────────────────────────────────────────────────────────────
-
-const HEADROOM_DEFAULT_URL = "http://localhost:8787";
-
-function HeadroomCard() {
-  const [data, setData] = useState<HeadroomStatsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function fetchStats() {
-    setLoading(true);
-    setError(null);
-    getHeadroomStats(HEADROOM_DEFAULT_URL)
-      .then(setData)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }
-
-  // Auto-connect on mount
-  useEffect(() => { fetchStats(); }, []);
-
-  const health = data?.configured ? data.health : null;
-  const lifetime = data?.configured ? data.stats?.persistent_savings?.lifetime : null;
-  const session = data?.configured ? data.stats?.persistent_savings?.display_session : null;
-
-  function statBox(label: string, value: string, highlight = false) {
-    return (
-      <Box key={label}>
-        <Typography variant="caption" color="text.secondary" display="block" mb={0.25}>{label}</Typography>
-        <Typography fontSize={24} fontWeight={700} lineHeight={1} color={highlight ? "success.main" : "text.primary"}>
-          {value}
-        </Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <Paper variant="outlined" sx={{ m: 2, p: 2.5, borderRadius: 2 }}>
-      <Box display="flex" alignItems="center" gap={1.5} mb={2.5}>
-        <Typography fontWeight={700} fontSize={14}>Headroom</Typography>
-        {loading && <CircularProgress size={14} />}
-        {!loading && data?.configured && (
-          <Chip label="connected" size="small" sx={{ bgcolor: "#dcfce7", color: "#15803d", border: "none", fontWeight: 600, fontSize: 11 }} />
-        )}
-        {!loading && data && !data.configured && (
-          <Chip label="not reachable" size="small" sx={{ bgcolor: "#fee2e2", color: "#dc2626", border: "none", fontWeight: 600, fontSize: 11 }} />
-        )}
-        {health && (
-          <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
-            v{health.version} &nbsp;·&nbsp; uptime {Math.floor(health.uptime_seconds / 60)}m &nbsp;·&nbsp; {HEADROOM_DEFAULT_URL}
-          </Typography>
-        )}
-        <Tooltip title="Refresh">
-          <IconButton size="small" onClick={fetchStats} disabled={loading} sx={{ ml: health ? 0 : "auto" }}>
-            <KeyboardArrowRightIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-
-      {error && <Alert severity="error" sx={{ mb: 1.5, py: 0.5 }}>{error}</Alert>}
-
-      {data && !data.configured && (
-        <Typography variant="body2" color="text.secondary">
-          Headroom proxy not running at {HEADROOM_DEFAULT_URL}. Start with <code>pnpm dev:one</code>.
-        </Typography>
-      )}
-
-      {lifetime && (
-        <Stack gap={3}>
-          <Box>
-            <Typography variant="caption" fontWeight={600} color="text.secondary" textTransform="uppercase" letterSpacing="0.07em" display="block" mb={1.5}>
-              Lifetime (persists across restarts)
-            </Typography>
-            <Stack direction="row" gap={5} flexWrap="wrap">
-              {statBox("Tokens Saved", fmtTokens(lifetime.tokens_saved), true)}
-              {statBox("Requests", lifetime.requests.toLocaleString())}
-              {statBox("Cost Saved", `$${lifetime.compression_savings_usd.toFixed(4)}`, lifetime.compression_savings_usd > 0)}
-              {statBox("Total Input Tokens", fmtTokens(lifetime.total_input_tokens))}
-            </Stack>
-          </Box>
-          {session && session.requests > 0 && (
-            <Box>
-              <Typography variant="caption" fontWeight={600} color="text.secondary" textTransform="uppercase" letterSpacing="0.07em" display="block" mb={1.5}>
-                This Session
-              </Typography>
-              <Stack direction="row" gap={5} flexWrap="wrap">
-                {statBox("Tokens Saved", fmtTokens(session.tokens_saved), true)}
-                {statBox("Savings", `${fmt(session.savings_percent)}%`, session.savings_percent > 0)}
-                {statBox("Requests", session.requests.toLocaleString())}
-                {statBox("Cost Saved", `$${session.compression_savings_usd.toFixed(4)}`, session.compression_savings_usd > 0)}
-              </Stack>
-            </Box>
-          )}
-        </Stack>
-      )}
-    </Paper>
   );
 }
 

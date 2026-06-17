@@ -594,8 +594,7 @@ export class ProcessManager {
       handleFlowControl: true,
     });
 
-    const sessionStart = Date.now();
-    let headroomStatsPoller: NodeJS.Timer | null = null;
+    let headroomStatsPoller: ReturnType<typeof setInterval> | null = null;
 
     this.running.set(args.sessionId, {
       pty: p,
@@ -618,17 +617,15 @@ export class ProcessManager {
     })();
 
     if (args.headroom) {
-      headroomStatsPoller = setInterval(async () => {
-        try {
-          const res = await fetch("http://localhost:8787/stats", {
-            timeout: 2000,
-          });
-          if (!res.ok) return;
-          const stats = await res.json() as any;
-          // Stats are fetched here for future use (e.g. compression savings display).
-          // Token tracking for headroom-shell claude sessions is handled by the
-          // AF status line parser, so we intentionally do not call applyUsageTick.
-        } catch {}
+      headroomStatsPoller = setInterval(() => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 2000);
+        fetch("http://localhost:8787/stats", { signal: ctrl.signal })
+          .then((r) => r.ok ? r.json() : null)
+          .catch(() => null)
+          .finally(() => clearTimeout(t));
+        // Stats fetched for future use. Token tracking for headroom-shell claude
+        // sessions is handled by the AF status line parser via applyUsageTick.
       }, 3000);
     }
 
