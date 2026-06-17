@@ -182,7 +182,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const sessionsWithTitle = sessions.map(({ summary_content, ...s }) => {
       let session_title: string | null = null;
       if (summary_content) {
-        try { session_title = (JSON.parse(summary_content) as { title?: string }).title ?? null; } catch {}
+        try { session_title = (JSON.parse(summary_content) as { title?: string }).title ?? null; } catch { /* noop */ }
       }
       return { ...s, session_title };
     });
@@ -353,7 +353,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       try {
         const parsed = JSON.parse(artifact.content) as { diff?: string; changedFiles?: string[] };
         if (parsed.diff) diffText = parsed.diff.slice(0, 3000);
-      } catch {}
+      } catch { /* noop */ }
     }
 
     const stdinRows = db
@@ -362,10 +362,12 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const stdinText = stdinRows
       .map((r) => r.data)
       .join("")
+      /* eslint-disable no-control-regex */
       .replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, "")
       .replace(/\x1b<[^M]*M/g, "")
       .replace(/\x1b[^[]/g, "")
       .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+      /* eslint-enable no-control-regex */
       .trim()
       .slice(0, 2000);
 
