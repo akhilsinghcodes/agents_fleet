@@ -553,6 +553,7 @@ export class ProcessManager {
     command: string;
     cols?: number;
     rows?: number;
+    headroom?: boolean;
   }) {
     const cols = args.cols ?? 120;
     const rows = args.rows ?? 30;
@@ -561,6 +562,10 @@ export class ProcessManager {
     if (process.platform !== "win32") {
       env.LANG ??= "en_US.UTF-8";
       env.TERM ??= "xterm-256color";
+    }
+    if (args.headroom) {
+      env.ANTHROPIC_BASE_URL = "http://localhost:8787";
+      env.OPENAI_BASE_URL = "http://localhost:8787/v1";
     }
 
     const shell =
@@ -581,6 +586,9 @@ export class ProcessManager {
       handleFlowControl: true,
     });
 
+    const sessionStart = Date.now();
+    let headroomStatsPoller: NodeJS.Timer | null = null;
+
     this.running.set(args.sessionId, {
       pty: p,
       cols,
@@ -600,6 +608,32 @@ export class ProcessManager {
       });
       if (updated) this.hub.broadcastSession(updated);
     })();
+
+    if (args.headroom) {
+      headroomStatsPoller = setInterval(async () => {
+        try {
+          const res = await fetch("http://localhost:8787/stats", {
+            timeout: 2000,
+          });
+          if (!res.ok) return;
+          const stats = await res.json() as any;
+          const displaySession = stats?.persistent_savings?.display_session;
+          if (displaySession) {
+            const inputTokens = displaySession.total_input_tokens ?? 0;
+            const outputTokens = Math.max(0, displaySession.tokens_saved ?? 0);
+            const costUsd = displaySession.compression_savings_usd ?? 0;
+            if (inputTokens > 0 || outputTokens > 0) {
+              this.applyUsageTick(args.sessionId, {
+                inputTokens,
+                outputTokens,
+                costUsd,
+                source: "headroom_proxy_stats",
+              });
+            }
+          }
+        } catch {}
+      }, 3000);
+    }
 
     const handleOutputText = async (text: string) => {
       // PTY streams include ANSI escape codes (colors, cursor moves, clears) which can wildly
@@ -751,6 +785,10 @@ export class ProcessManager {
               if (!m) break;
               lastMatch = m;
             }
+            if (process.env.DEBUG_STATUS_LINE) {
+              if (!lastMatch) console.log(`[DEBUG] No AF match in tail. Last 200 chars:`, r2.claudeCleanTail.slice(-200));
+              if (lastMatch) console.log(`[DEBUG] AF match found:`, lastMatch[0]);
+            }
             if (lastMatch) {
               const inputTokens = Number(lastMatch[1]);
               const outputTokens = Number(lastMatch[2]);
@@ -776,7 +814,7 @@ export class ProcessManager {
     });
 
     p.onExit(({ exitCode, signal }) => {
-      // Resolve any graceful-exit waiters before the async work below.
+      if (headroomStatsPoller) clearInterval(headroomStatsPoller);
       const r0 = this.running.get(args.sessionId);
       if (r0) {
         for (const resolve of r0.exitWaiters) resolve();
