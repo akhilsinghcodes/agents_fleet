@@ -1,0 +1,15 @@
+# NOTICE
+
+Agents Fleet
+Copyright (c) 2026 Maheshwar Akhileshwar Singh
+Licensed under the MIT License.
+
+---
+
+## Third-Party Acknowledgements
+
+### Headroom
+- Repository: https://github.com/chopratejas/headroom
+- License: Apache License 2.0
+- Usage: Agents Fleet optionally integrates with Headroom as a local context-compression proxy.
+  Headroom is not bundled or redistributed; it is invoked as an external process at runtime.
