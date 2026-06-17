@@ -1,63 +1,63 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useEffect, useMemo, useState } from "react";
 import type {
-  DashboardAlerts,
-  DashboardCommandStat,
-  DashboardDaySpend,
-  DashboardModelStat,
-  DashboardRepo,
-  DashboardSession,
-  DashboardStats,
+    DashboardAlerts,
+    DashboardCommandStat,
+    DashboardDaySpend,
+    DashboardModelStat,
+    DashboardRepo,
+    DashboardSession,
+    DashboardStats,
 } from "./api";
 import {
-  getDashboardAlerts,
-  getDashboardByCommand,
-  getDashboardByModel,
-  getDashboardByRepo,
-  getDashboardStats,
-  getLiteLLMSpend,
-  getHeadroomStats,
-  type HeadroomStatsResponse,
-  type LiteLLMSpendLog,
-  type LiteLLMDailyActivity,
+    getDashboardAlerts,
+    getDashboardByCommand,
+    getDashboardByModel,
+    getDashboardByRepo,
+    getDashboardStats,
+    getHeadroomStats,
+    getLiteLLMSpend,
+    type HeadroomStatsResponse,
+    type LiteLLMDailyActivity,
+    type LiteLLMSpendLog,
 } from "./api";
 
-import {
-  Box,
-  Typography,
-  Button,
-  ButtonGroup,
-  Chip,
-  CircularProgress,
-  Alert,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TableSortLabel,
-  LinearProgress,
-  Collapse,
-  IconButton,
-  Tooltip,
-  Stack,
-  useTheme,
-} from "@mui/material";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import {
+    Alert,
+    Box,
+    Button,
+    ButtonGroup,
+    Chip,
+    CircularProgress,
+    Collapse,
+    IconButton,
+    LinearProgress,
+    Paper,
+    Stack,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
+    TableSortLabel,
+    Tooltip,
+    Typography,
+    useTheme
+} from "@mui/material";
 
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip as RechartsTooltip,
-  ReferenceLine,
-  ResponsiveContainer,
-  Cell,
+    Bar,
+    BarChart,
+    Cell,
+    Tooltip as RechartsTooltip,
+    ReferenceLine,
+    ResponsiveContainer,
+    XAxis,
+    YAxis,
 } from "recharts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
