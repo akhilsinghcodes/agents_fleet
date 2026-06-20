@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createSession, deleteSession, listSessions, stopSession } from "./api";
 import ClaudeSdkChat from "./ClaudeSdkChat";
 import { AnalyticsContent } from "./Analytics";
+import { AiCoachAnalyticsContent } from "./AiCoachAnalytics";
 import { DashboardContent } from "./Dashboard";
 import HeadroomChat from "./HeadroomChat";
 import LiteLLMChat from "./LiteLLMChat";
@@ -34,7 +35,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard" | "analytics";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard" | "analytics" | "ai_coach";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -406,6 +407,7 @@ function MainApp() {
     { key: "headroom_shell", label: "Headroom Shell" },
     { key: "dashboard", label: "Spend Analytics" },
     { key: "analytics", label: "Analytics" },
+    { key: "ai_coach", label: "AI Coach Analytics" },
   ];
 
   // ── Center-tab config ────────────────────────────────────────────────────────
@@ -420,7 +422,7 @@ function MainApp() {
       sx={{
         height: "100vh",
         display: "grid",
-        gridTemplateColumns: (leftTab === "dashboard") ? "1fr" : "1fr 300px",
+        gridTemplateColumns: (leftTab === "dashboard" || leftTab === "ai_coach") ? "1fr" : "1fr 300px",
         gridTemplateRows: "1fr",
         bgcolor: "background.default",
         overflow: "hidden",
@@ -571,6 +573,8 @@ function MainApp() {
             </Box>
           ) : leftTab === "analytics" ? (
             <AnalyticsContent sessionId={selectedId} />
+          ) : leftTab === "ai_coach" ? (
+            <AiCoachAnalyticsContent />
           ) : leftTab === "headroom_shell" ? (
             /* Headroom Shell tab - identical to Shell tab but with headroom: true */
             <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>

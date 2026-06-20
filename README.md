@@ -16,6 +16,7 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
   - 45 built-in detection rules (ported from [AI Engineering Coach](https://github.com/microsoft/AI-Engineering-Coach)) flag anti-patterns like runaway agent loops, late-night coding, lazy prompting, auto-model avoidance — each with severity, occurrence count, and a concrete suggestion
   - Parses your own `~/.claude/projects` or `~/.codex` logs and scopes them to the exact AgentFleet session window — no duplicate/global stats
   - Backfillable: `pnpm --filter @agents_fleet/server exec tsx scripts/backfill-analytics.ts` analyzes any historical stopped sessions that predate this feature
+  - New **AI Coach Analytics** tab: cross-session dashboard over a date range — avg practice score, per-category trends, top anti-patterns across all sessions, an hour×weekday activity heatmap, a per-repo project breakdown, a session timeline, and an SDLC work-type split (bug fix / feature / refactor / docs / etc.)
   - Full breakdown: [AI_COACH.md](AI_COACH.md)
 - **AI session summary** (latest)
   - One-click plain-English summary of any session — title, what the agent did, and token/cost breakdown for the summary call
@@ -78,9 +79,31 @@ This repository contains a **working MVP**:
 
 ![Local-first architecture](screenshots/Local_Control_for_AI_Agents.png)
 
-**AI Coach analytics — category scorecards + anti-patterns**
+**AI Coach analytics — category scorecards + anti-patterns (per-session)**
 
 ![AI Coach analytics scorecard](screenshots/AI_Coach_Analytics_Scorecard.png)
+
+- Detailed anti-pattern breakdown (severity, occurrences, suggestion per rule)
+
+![AI Coach analytics detailed anti-patterns](screenshots/AI_Coach_Analytics_Anti_Patterns.png)
+
+**AI Coach Analytics — cross-session dashboard**
+
+- Dashboard — avg practice score, per-category trends, top anti-patterns, daily activity, harness mix
+
+![AI Coach Analytics dashboard](screenshots/AI_Coach_Analytics_Dashboard.png)
+
+- Patterns — hour×weekday activity heatmap, session calendar, per-repo project breakdown
+
+![AI Coach Analytics patterns](screenshots/AI_Coach_Analytics_Patterns.png)
+
+- Timeline — recent sessions with repo, harness, duration, requests, score, and cost
+
+![AI Coach Analytics timeline](screenshots/AI_Coach_Analytics_Timeline_Wide.png)
+
+- SDLC — work-type distribution (bug fix / feature / test / config / docs / style / refactor / code review) overall and per-repo
+
+![AI Coach Analytics SDLC breakdown](screenshots/AI_Coach_Analytics_SDLC.png)
 
 **Create a new session**
 

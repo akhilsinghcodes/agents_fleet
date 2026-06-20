@@ -7,6 +7,7 @@ import { claudeSdkRouter } from "./routes/claudeSdk";
 import { liteLlmRouter } from "./routes/litellm";
 import { dashboardRouter } from "./routes/dashboard";
 import { analyticsRouter } from "./routes/analytics";
+import { aiCoachAnalyticsRouter } from "./routes/aiCoachAnalytics";
 import { getValidModelIds } from "./litellm";
 
 export type AgentsFleetServer = {
@@ -39,6 +40,7 @@ export function createApp(): AgentsFleetServer {
   app.use("/api", liteLlmRouter(processManager));
   app.use("/api", dashboardRouter());
   app.use("/api", analyticsRouter());
+  app.use("/api", aiCoachAnalyticsRouter());
 
   return { app, hub, processManager };
 }
