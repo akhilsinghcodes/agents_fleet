@@ -2,6 +2,7 @@ import type { Session } from "@agents_fleet/shared";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createSession, deleteSession, listSessions, stopSession } from "./api";
 import ClaudeSdkChat from "./ClaudeSdkChat";
+import { AnalyticsContent } from "./Analytics";
 import { DashboardContent } from "./Dashboard";
 import HeadroomChat from "./HeadroomChat";
 import LiteLLMChat from "./LiteLLMChat";
@@ -33,7 +34,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard" | "analytics";
 type CenterTab = "terminal" | "logs" | "artifacts";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -404,6 +405,7 @@ function MainApp() {
     { key: "headroom_chat", label: "Headroom Chat" },
     { key: "headroom_shell", label: "Headroom Shell" },
     { key: "dashboard", label: "Spend Analytics" },
+    { key: "analytics", label: "Analytics" },
   ];
 
   // ── Center-tab config ────────────────────────────────────────────────────────
@@ -567,6 +569,8 @@ function MainApp() {
                 />
               )}
             </Box>
+          ) : leftTab === "analytics" ? (
+            <AnalyticsContent sessionId={selectedId} />
           ) : leftTab === "headroom_shell" ? (
             /* Headroom Shell tab - identical to Shell tab but with headroom: true */
             <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
