@@ -182,6 +182,119 @@ export async function getSessionAnalytics(
   return json;
 }
 
+export interface AiCoachGroupAverage {
+  group: PracticeGroup;
+  avgScore: number;
+}
+
+export interface AiCoachTopAntiPattern {
+  id: string;
+  name: string;
+  group: PracticeGroup;
+  severity: "high" | "medium" | "low";
+  totalOccurrences: number;
+  sessionCount: number;
+}
+
+export interface AiCoachDailyActivity {
+  date: string;
+  sessionCount: number;
+  avgScore: number | null;
+}
+
+export interface AiCoachHarnessBreakdown {
+  harness: string;
+  count: number;
+  avgScore: number | null;
+}
+
+export interface AiCoachDashboardData {
+  sessionCount: number;
+  avgPracticeScore: number | null;
+  groupAverages: AiCoachGroupAverage[];
+  topAntiPatterns: AiCoachTopAntiPattern[];
+  dailyActivity: AiCoachDailyActivity[];
+  harnessBreakdown: AiCoachHarnessBreakdown[];
+}
+
+export interface AiCoachProject {
+  repoPath: string;
+  sessionCount: number;
+  requestCount: number;
+  avgScore: number | null;
+  models: string[];
+}
+
+export interface AiCoachCalendarDay {
+  date: string;
+  count: number;
+}
+
+export interface AiCoachPatternsData {
+  heatmap: number[][];
+  calendar: AiCoachCalendarDay[];
+  projects: AiCoachProject[];
+}
+
+export interface AiCoachTimelineSession {
+  sessionId: string;
+  title: string | null;
+  repoPath: string;
+  command: string;
+  harness: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  requestCount: number;
+  practiceScore: number | null;
+  estimatedCost: number;
+}
+
+export interface AiCoachByRepoSdlc {
+  repoPath: string;
+  workTypeCounts: Record<string, number>;
+}
+
+export interface AiCoachSdlcData {
+  sessionCount: number;
+  totalRequests: number;
+  workTypeCounts: Record<string, number>;
+  workTypePct: Record<string, number>;
+  byRepo: AiCoachByRepoSdlc[];
+}
+
+function dateRangeParams(from: string, to: string): string {
+  return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+}
+
+export async function getAiCoachDashboard(from: string, to: string): Promise<AiCoachDashboardData> {
+  const res = await fetch(`/api/ai-coach/dashboard?${dateRangeParams(from, to)}`);
+  const json = await parseJson<AiCoachDashboardData | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as AiCoachDashboardData;
+}
+
+export async function getAiCoachPatterns(from: string, to: string): Promise<AiCoachPatternsData> {
+  const res = await fetch(`/api/ai-coach/patterns?${dateRangeParams(from, to)}`);
+  const json = await parseJson<AiCoachPatternsData | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as AiCoachPatternsData;
+}
+
+export async function getAiCoachTimeline(from: string, to: string): Promise<AiCoachTimelineSession[]> {
+  const res = await fetch(`/api/ai-coach/timeline?${dateRangeParams(from, to)}`);
+  const json = await parseJson<{ sessions: AiCoachTimelineSession[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return (json as { sessions: AiCoachTimelineSession[] }).sessions;
+}
+
+export async function getAiCoachSdlc(from: string, to: string): Promise<AiCoachSdlcData> {
+  const res = await fetch(`/api/ai-coach/sdlc?${dateRangeParams(from, to)}`);
+  const json = await parseJson<AiCoachSdlcData | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as AiCoachSdlcData;
+}
+
 export async function getSession(id: string): Promise<Session> {
   const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
   const json = await parseJson<{ session: Session } | ApiErrorShape>(res);

@@ -154,6 +154,19 @@ GET /api/analytics/sessions/:id
 
 Returns `404` if the session hasn't been analyzed yet (unknown harness, or no logs found in the session's time window).
 
+## Cross-session dashboard (AI Coach Analytics tab)
+
+While the per-session view above answers "how did this one session go," the **AI Coach Analytics** tab aggregates every analyzed session over a date range you pick:
+
+```
+GET /api/ai-coach/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD   # avg score, per-category trends, top anti-patterns, daily activity, harness mix
+GET /api/ai-coach/patterns?from=...&to=...                  # hour × weekday request heatmap, calendar, per-repo project stats
+GET /api/ai-coach/timeline?from=...&to=...                  # most recent 200 sessions in range, with title/duration/score/cost
+GET /api/ai-coach/sdlc?from=...&to=...                       # work-type split (bug fix / feature / refactor / docs / config / code review / other) per request, overall and per-repo
+```
+
+All four routes join `session_analytics` with `sessions` (and the `session_summary` artifact, for session titles), scoped to `s.created_at BETWEEN from AND to`, and exclude bare `zsh`/`bash` shell sessions. `workType` is a per-request classification already present on the parsed `SessionRequest` from the rule engine — no extra parsing pass needed.
+
 ## Privacy & data flow
 
 Everything runs locally:
@@ -170,7 +183,9 @@ Everything runs locally:
 | Persists analysis results into SQLite | [apps/server/src/analytics-worker.ts](apps/server/src/analytics-worker.ts) |
 | `session_analytics` table | [apps/server/src/db.ts](apps/server/src/db.ts) |
 | API route | [apps/server/src/routes/analytics.ts](apps/server/src/routes/analytics.ts) |
-| Analytics tab UI | [apps/web/src/Analytics.tsx](apps/web/src/Analytics.tsx) |
+| Analytics tab UI (per-session) | [apps/web/src/Analytics.tsx](apps/web/src/Analytics.tsx) |
+| Cross-session dashboard API | [apps/server/src/routes/aiCoachAnalytics.ts](apps/server/src/routes/aiCoachAnalytics.ts) |
+| Cross-session dashboard UI | [apps/web/src/AiCoachAnalytics.tsx](apps/web/src/AiCoachAnalytics.tsx) |
 | Historical backfill script | [apps/server/scripts/backfill-analytics.ts](apps/server/scripts/backfill-analytics.ts) |
 
 ## Credits
