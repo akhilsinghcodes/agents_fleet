@@ -90,6 +90,27 @@ export function getDb(): Db {
 
     CREATE INDEX IF NOT EXISTS idx_session_artifacts_session_ts
       ON session_artifacts(session_id, timestamp);
+
+    -- Post-hoc qualitative analysis (practice score, anti-patterns) derived from
+    -- parsing the agent's own log files (e.g. ~/.claude/projects, ~/.codex).
+    -- Additive only: never read/written by existing budget or replay features.
+    CREATE TABLE IF NOT EXISTS session_analytics (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL UNIQUE,
+      harness TEXT NOT NULL,
+      parsed_requests TEXT NOT NULL,
+      practice_score REAL NULL,
+      anti_patterns TEXT NOT NULL,
+      group_scores TEXT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_analytics_session
+      ON session_analytics(session_id);
+
+    CREATE INDEX IF NOT EXISTS idx_session_analytics_harness
+      ON session_analytics(harness);
   `);
 
   // Migrations (sessions columns)
@@ -120,6 +141,7 @@ export function getDb(): Db {
     "budget_exceeded_at TEXT NULL",
   );
   ensureColumn(db, "sessions", "stop_reason", "stop_reason TEXT NULL");
+  ensureColumn(db, "session_analytics", "group_scores", "group_scores TEXT NULL");
 
   dbSingleton = db;
   return db;

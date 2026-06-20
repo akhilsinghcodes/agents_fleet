@@ -467,6 +467,7 @@ Respond with JSON only, no markdown:
     db.prepare("DELETE FROM stdin_events WHERE session_id = ?").run(id);
     db.prepare("DELETE FROM session_markers WHERE session_id = ?").run(id);
     db.prepare("DELETE FROM session_artifacts WHERE session_id = ?").run(id);
+    db.prepare("DELETE FROM session_analytics WHERE session_id = ?").run(id);
     db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 
     return res.json({});

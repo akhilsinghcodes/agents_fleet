@@ -10,12 +10,15 @@ importers:
 
   apps/server:
     dependencies:
+      '@agents_fleet/ai-coach-analytics':
+        specifier: workspace:*
+        version: link:../../packages/ai-coach-analytics
       '@agents_fleet/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@anthropic-ai/sdk':
         specifier: ^0.100.1
-        version: 0.100.1
+        version: 0.100.1(zod@4.4.3)
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
@@ -126,6 +129,31 @@ importers:
       vite:
         specifier: ^5.4.2
         version: 5.4.21(@types/node@25.9.1)
+
+  packages/ai-coach-analytics:
+    dependencies:
+      leo-profanity:
+        specifier: ^1.9.0
+        version: 1.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@eslint/js':
+        specifier: ^9.9.1
+        version: 9.39.4
+      '@types/node':
+        specifier: ^22.13.5
+        version: 22.19.19
+      eslint:
+        specifier: ^9.9.1
+        version: 9.39.4
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.4.0
+        version: 8.60.0(eslint@9.39.4)(typescript@5.9.3)
 
   packages/shared:
     devDependencies:
@@ -1596,6 +1624,9 @@ packages:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
 
+  french-badwords-list@1.0.7:
+    resolution: {integrity: sha512-H1ziKs2PJh2+UXZ9oCGJ/rRQpsI9NBykGf2Sc7WaKaj1OnWFuBXfsvANTdRcfVmOghGQaUmRyZ1hJOPbDpy04Q==}
+
   fresh@0.5.2:
     resolution: {integrity: sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==}
     engines: {node: '>= 0.6'}
@@ -1751,6 +1782,10 @@ packages:
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
+
+  leo-profanity@1.9.0:
+    resolution: {integrity: sha512-vMrrrjsbT+fA5I/1rlBEVT5YjJsw1ASIVF8/xBEdZ6ylsg5AEIBrEvHxwe5XAmfVuTBi7aw2KcO2L3s9ddpKzw==}
+    engines: {node: '>=18'}
 
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
@@ -2041,6 +2076,10 @@ packages:
     resolution: {integrity: sha512-WHeFSbZYsPu3+bLoNRUuAO+wavNlocOPf3wSHTP7hcFKVnJeWsYlCDbr3mTS14FCizf9ccIxXA8sGL8zKeQN3g==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
+
+  russian-bad-words@0.5.0:
+    resolution: {integrity: sha512-euNvEYki6iYYpkNbeudW+lEMMYGEmN7EBwVF8ezlbv0bZoQpVYB7W10cCeUIGV7Ed50sJynLQ0c559q5iI0ejQ==}
+    engines: {node: '>=10'}
 
   safe-buffer@5.2.1:
     resolution: {integrity: sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==}
@@ -2376,12 +2415,17 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
-  '@anthropic-ai/sdk@0.100.1':
+  '@anthropic-ai/sdk@0.100.1(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
+    optionalDependencies:
+      zod: 4.4.3
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -3816,6 +3860,9 @@ snapshots:
 
   forwarded@0.2.0: {}
 
+  french-badwords-list@1.0.7:
+    optional: true
+
   fresh@0.5.2: {}
 
   fs-constants@1.0.0: {}
@@ -3944,6 +3991,11 @@ snapshots:
   keyv@4.5.4:
     dependencies:
       json-buffer: 3.0.1
+
+  leo-profanity@1.9.0:
+    optionalDependencies:
+      french-badwords-list: 1.0.7
+      russian-bad-words: 0.5.0
 
   levn@0.4.1:
     dependencies:
@@ -4244,6 +4296,9 @@ snapshots:
       '@rollup/rollup-win32-x64-gnu': 4.60.4
       '@rollup/rollup-win32-x64-msvc': 4.60.4
       fsevents: 2.3.3
+
+  russian-bad-words@0.5.0:
+    optional: true
 
   safe-buffer@5.2.1: {}
 
@@ -4596,3 +4651,5 @@ snapshots:
   yaml@1.10.3: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@4.4.3: {}
