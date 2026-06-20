@@ -30,13 +30,17 @@ import {
   YAxis,
 } from "recharts";
 import {
+  getAiCoachContextHealth,
   getAiCoachDashboard,
   getAiCoachPatterns,
   getAiCoachSdlc,
+  getAiCoachSkillFinder,
   getAiCoachTimeline,
+  type AiCoachContextHealthData,
   type AiCoachDashboardData,
   type AiCoachPatternsData,
   type AiCoachSdlcData,
+  type AiCoachSkillFinderData,
   type AiCoachTimelineSession,
   PRACTICE_GROUP_LABELS,
   type PracticeGroup,
@@ -103,6 +107,12 @@ const SEVERITY_COLOR: Record<string, "error" | "warning" | "default"> = {
   medium: "warning",
   low: "default",
 };
+
+function fmtTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
 
 function shortPath(p: string) {
   const parts = p.split("/");
@@ -239,6 +249,26 @@ function DashboardTab({ from, to }: { from: string; to: string }) {
             )}
           </Paper>
         ))}
+        <Paper sx={{ p: 2, minWidth: 140 }}>
+          <Typography fontSize={12} color="text.secondary">Output (tokens)</Typography>
+          <Typography fontSize={28} fontWeight={700}>{fmtTokens(data.tokenStats.totalOutputTokens)}</Typography>
+          <Typography fontSize={12} color="text.secondary">{fmtTokens(data.tokenStats.totalInputTokens)} in</Typography>
+        </Paper>
+        <Paper sx={{ p: 2, minWidth: 140 }}>
+          <Typography fontSize={12} color="text.secondary">Burndown</Typography>
+          <Typography fontSize={28} fontWeight={700}>
+            {fmtTokens(data.tokenStats.totalInputTokens + data.tokenStats.totalOutputTokens)}
+            {data.tokenStats.totalBudgetTokens > 0 && (
+              <Typography component="span" fontSize={16} color="text.secondary">
+                {" "}/ {fmtTokens(data.tokenStats.totalBudgetTokens)}
+              </Typography>
+            )}
+          </Typography>
+          <Typography fontSize={12} color="text.secondary">
+            ${data.tokenStats.totalCostUsd.toFixed(2)} spent
+            {data.tokenStats.totalBudgetUsd > 0 && ` / $${data.tokenStats.totalBudgetUsd.toFixed(2)} budget`}
+          </Typography>
+        </Paper>
       </Stack>
 
       {/* Scorecard group averages */}
@@ -782,15 +812,144 @@ function SdlcTab({ from, to }: { from: string; to: string }) {
   );
 }
 
+// ── Sub-tab: Skill Finder ─────────────────────────────────────────────────────
+
+function SkillFinderTab({ from, to }: { from: string; to: string }) {
+  const [data, setData] = useState<AiCoachSkillFinderData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getAiCoachSkillFinder(from, to)
+      .then(setData)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  if (loading) return <Box p={3}><CircularProgress size={20} /></Box>;
+  if (error) return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
+  if (!data || data.skills.length === 0) {
+    return (
+      <Typography p={3} fontSize={13} color="text.secondary">
+        No underused features detected in this period — you're already using skills, slash
+        commands, plan mode, and project instructions consistently.
+      </Typography>
+    );
+  }
+
+  return (
+    <Box sx={{ p: 2.5, overflow: "auto" }}>
+      <Typography fontSize={13} color="text.secondary" mb={1.5}>
+        Harness features you're not taking advantage of yet, ranked by how often they were flagged
+        across {data.sessionCount} session{data.sessionCount !== 1 ? "s" : ""}.
+      </Typography>
+      <Stack spacing={1}>
+        {data.skills.map((s) => (
+          <Paper key={s.id} sx={{ p: 1.5 }}>
+            <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
+              <Chip size="small" label={s.severity} color={SEVERITY_COLOR[s.severity] ?? "default"} />
+              <Chip size="small" variant="outlined" label={PRACTICE_GROUP_LABELS[s.group] ?? s.group} />
+              <Typography fontSize={13} fontWeight={700}>{s.name}</Typography>
+              <Typography fontSize={12} color="text.secondary" ml="auto">
+                {s.sessionCount} session{s.sessionCount !== 1 ? "s" : ""} · {s.totalOccurrences} occurrences
+              </Typography>
+            </Stack>
+            {s.suggestion && (
+              <Typography fontSize={13} color="text.secondary">{s.suggestion}</Typography>
+            )}
+          </Paper>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+// ── Sub-tab: Context Health ───────────────────────────────────────────────────
+
+function ContextHealthTab({ from, to }: { from: string; to: string }) {
+  const [data, setData] = useState<AiCoachContextHealthData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getAiCoachContextHealth(from, to)
+      .then(setData)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  if (loading) return <Box p={3}><CircularProgress size={20} /></Box>;
+  if (error) return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
+  if (!data || data.sessionCount === 0) {
+    return <Typography p={3} fontSize={13} color="text.secondary">No analyzed sessions in this period.</Typography>;
+  }
+
+  return (
+    <Box sx={{ p: 2.5, overflow: "auto" }}>
+      <Stack direction="row" spacing={2} mb={2.5} flexWrap="wrap" useFlexGap>
+        <Paper sx={{ p: 2, minWidth: 160 }}>
+          <Typography fontSize={12} color="text.secondary">Context Health score</Typography>
+          <Typography fontSize={28} fontWeight={700} color={data.score != null ? scoreHex(data.score) : undefined}>
+            {data.score ?? "—"}
+          </Typography>
+          {data.score != null && (
+            <LinearProgress variant="determinate" value={data.score} color={scoreColor(data.score)} sx={{ height: 6, borderRadius: 1, mt: 0.5 }} />
+          )}
+        </Paper>
+        <Paper sx={{ p: 2, minWidth: 160 }}>
+          <Typography fontSize={12} color="text.secondary">Sessions with gaps</Typography>
+          <Typography fontSize={28} fontWeight={700}>
+            {data.sessionsWithFindings} / {data.sessionCount}
+          </Typography>
+        </Paper>
+      </Stack>
+
+      <Typography fontSize={14} fontWeight={700} mb={1}>
+        Context engineering gaps ({data.findings.length})
+      </Typography>
+      {data.findings.length === 0 ? (
+        <Typography fontSize={13} color="text.secondary">
+          No context-engineering gaps detected — AGENTS.md/CLAUDE.md, file references, and
+          devcontainers are all in good shape.
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {data.findings.map((f) => (
+            <Paper key={f.id} sx={{ p: 1.5 }}>
+              <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
+                <Chip size="small" label={f.severity} color={SEVERITY_COLOR[f.severity] ?? "default"} />
+                <Typography fontSize={13} fontWeight={700}>{f.name}</Typography>
+                <Typography fontSize={12} color="text.secondary" ml="auto">
+                  {f.sessionCount} session{f.sessionCount !== 1 ? "s" : ""} · {f.totalOccurrences} occurrences
+                </Typography>
+              </Stack>
+              <Typography fontSize={13} color="text.secondary">{f.description}</Typography>
+              {f.suggestion && (
+                <Typography fontSize={13} mt={0.5}>{f.suggestion}</Typography>
+              )}
+            </Paper>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
 // ── Root component ────────────────────────────────────────────────────────────
 
-type CoachTab = "dashboard" | "patterns" | "timeline" | "sdlc";
+type CoachTab = "dashboard" | "patterns" | "timeline" | "sdlc" | "skill-finder" | "context-health";
 
 const COACH_TABS: { key: CoachTab; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
   { key: "patterns", label: "Patterns" },
   { key: "timeline", label: "Timeline" },
   { key: "sdlc", label: "SDLC" },
+  { key: "skill-finder", label: "Skill Finder" },
+  { key: "context-health", label: "Context Health" },
 ];
 
 export function AiCoachAnalyticsContent() {
@@ -846,6 +1005,8 @@ export function AiCoachAnalyticsContent() {
         {tab === "patterns" && <PatternsTab from={from} to={to} />}
         {tab === "timeline" && <TimelineTab from={from} to={to} />}
         {tab === "sdlc" && <SdlcTab from={from} to={to} />}
+        {tab === "skill-finder" && <SkillFinderTab from={from} to={to} />}
+        {tab === "context-health" && <ContextHealthTab from={from} to={to} />}
       </Box>
     </Box>
   );

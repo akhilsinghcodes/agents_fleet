@@ -98,6 +98,17 @@ function firstRequestMessage(row: DetailRow): string {
   return first ? truncatedText(first.messageText) : '';
 }
 
+/** Same field lookup as the `examples` template fallback, but untruncated —
+ *  used to let the UI expand a card's preview to the full matched text. */
+function fullExampleText(row: DetailRow): string {
+  if (typeof row.messageText === 'string' && row.messageText) return row.messageText;
+  if (Array.isArray(row.requests) && row.requests.length > 0) {
+    const first = recordValue(row.requests[0]);
+    if (first && typeof first.messageText === 'string') return first.messageText;
+  }
+  return textValue(row.workspaceName);
+}
+
 function addSessionDetail(row: DetailRow, details: OccurrenceDetail[], weekCounts: Map<string, number>): void {
   const timestamp = numericValue(row.creationDate ?? row.lastMessageDate ?? row.startTime);
   addWeekCount(weekCounts, timestamp);
@@ -170,6 +181,11 @@ function emissionToAntiPattern(
 
   details.sort((a, b) => b.timestamp - a.timestamp);
 
+  const examplesFull = (emission.matchedRows ?? [])
+    .slice(0, emission.examples.length)
+    .map(fullExampleText)
+    .filter(Boolean);
+
   return {
     id: rule.id,
     name: rule.name,
@@ -179,6 +195,7 @@ function emissionToAntiPattern(
     description,
     suggestion,
     examples: emission.examples,
+    examplesFull,
     details,
     weeklyHist: buildWeeklyHist(weekCounts),
   };
