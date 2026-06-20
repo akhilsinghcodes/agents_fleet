@@ -4,6 +4,7 @@ import type { Session, SessionStatus } from "@agents_fleet/shared";
 import pty, { type IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import { getDb } from "./db";
 import { computeCostUsd, estimateTokens } from "./budget";
+import { analyzeCompletedSession } from "./analytics-worker";
 import stripAnsi from "strip-ansi";
 import type { SessionWsHub } from "./ws";
 import {
@@ -852,6 +853,15 @@ export class ProcessManager {
         }
         if (updated) this.hub.broadcastSession(updated);
         this.running.delete(args.sessionId);
+        // Best-effort post-hoc analytics (practice score, anti-patterns).
+        // Never allowed to affect session lifecycle/state, hence the .catch().
+        analyzeCompletedSession(
+          args.sessionId,
+          args.command,
+          args.repoPath,
+          current?.created_at,
+          endedAt,
+        ).catch((err) => console.error("[analytics] analysis failed:", err));
       })();
     });
   }

@@ -13,3 +13,10 @@ Licensed under the MIT License.
 - License: Apache License 2.0
 - Usage: Agents Fleet optionally integrates with Headroom as a local context-compression proxy.
   Headroom is not bundled or redistributed; it is invoked as an external process at runtime.
+
+### AI Engineering Coach
+- Repository: https://github.com/microsoft/AI-Engineering-Coach
+- License: MIT License, Copyright (c) Microsoft Corporation.
+- Usage: The session log parsers, anti-pattern rule engine, and rule/metric definitions in
+  `packages/ai-coach-analytics` are ported from AI Engineering Coach's `src/core` module, adapted
+  from a VS Code extension into a standalone package consumed by Agents Fleet's web UI.

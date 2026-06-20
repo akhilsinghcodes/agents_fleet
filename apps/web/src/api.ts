@@ -129,6 +129,59 @@ export async function listSessions(): Promise<Session[]> {
   return json.sessions;
 }
 
+export interface SessionAnalyticsAntiPattern {
+  id: string;
+  name: string;
+  severity: "high" | "medium" | "low";
+  group: PracticeGroup;
+  occurrences: number;
+  description: string;
+  suggestion: string;
+}
+
+export type PracticeGroup =
+  | "prompt-quality"
+  | "session-hygiene"
+  | "code-review"
+  | "tool-mastery"
+  | "context-management";
+
+export interface SessionAnalyticsGroupScore {
+  group: PracticeGroup;
+  score: number;
+  topIssue: string | null;
+  improvements: string[];
+  patternCount: number;
+}
+
+export const PRACTICE_GROUP_LABELS: Record<PracticeGroup, string> = {
+  "prompt-quality": "Prompt Quality",
+  "session-hygiene": "Session Hygiene",
+  "code-review": "Code Review",
+  "tool-mastery": "Tool Mastery",
+  "context-management": "Context Management",
+};
+
+export interface SessionAnalytics {
+  sessionId: string;
+  harness: string;
+  practiceScore: number | null;
+  antiPatterns: SessionAnalyticsAntiPattern[];
+  groupScores: SessionAnalyticsGroupScore[];
+  createdAt: string;
+}
+
+export async function getSessionAnalytics(
+  id: string,
+): Promise<SessionAnalytics | null> {
+  const res = await fetch(`/api/analytics/sessions/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  const json = await parseJson<SessionAnalytics | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  if (!res.ok) throw new Error("Request failed");
+  return json;
+}
+
 export async function getSession(id: string): Promise<Session> {
   const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
   const json = await parseJson<{ session: Session } | ApiErrorShape>(res);
