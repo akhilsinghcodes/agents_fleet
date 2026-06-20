@@ -19,12 +19,16 @@ graph TD
   S --> SDK[Claude SDK runner Anthropic]
   S --> LLM[LiteLLM chat runner proxy backed]
   S --> REPO[Local repository]
+  S --> AC[ai-coach-analytics package]
 
   PTY -->|runs in cwd| REPO
   PTY -->|PTY output stream| S
   S -->|Anthropic SDK messages.create| SDK
   S -->|OpenAI compatible chat| LLM
   S -->|tool run_command in repo cwd| REPO
+  S -->|on session stop, parses logs| AC
+  AC -->|reads| LOGS[(~/.claude/projects, ~/.codex)]
+  AC -->|anti-patterns + scores| DB
 ```
 
 ## SQLite schema (MVP)
@@ -38,6 +42,7 @@ The server persists everything to a local SQLite DB at `data/agents_fleet.sqlite
 | `stdin_events` | Audit trail of user input sent to the PTY (bounded/escaped) | Useful for debugging/auditing without corrupting terminal replay |
 | `session_markers` | Important timestamps like `stop_requested`, `budget_exceeded`, `process_exit` | Supports replay UX (e.g. freezing replay before TUI cleanup) and debugging session lifecycle |
 | `session_artifacts` | Per-session artifacts keyed by `session_id` | Stores git snapshots plus chat/session artifacts (transcripts, usage snapshots, tool approvals/results) for later inspection/export |
+| `session_analytics` | Practice score + anti-patterns + per-category group scores, keyed by `session_id` | Backs the **Analytics** tab — qualitative coaching data derived from parsing the agent's own log files, additive to (and independent from) the cost/budget data already on `sessions` |
 
 ## Notes
 - Interactive agent CLIs (e.g. Claude Code, Codex) render a full-screen TUI via ANSI escape codes.
@@ -63,3 +68,11 @@ The server persists everything to a local SQLite DB at `data/agents_fleet.sqlite
 - Requests are routed through an OpenAI-compatible LiteLLM proxy endpoint configured by `LITELLM_BASE_URL` and `LITELLM_API_KEY`.
 - The UI supports model selection, chat history, and the same Approve/Reject workflow for tool calls.
 - Tool outputs and usage are persisted so budget enforcement and replay remain consistent across providers.
+
+### AI Coach analytics
+- On session stop, `analytics-worker.ts` calls into `@agents_fleet/ai-coach-analytics` (a standalone workspace package ported from [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach)) to analyze the session — see [AI_COACH.md](AI_COACH.md) for the full breakdown.
+- The package parses Claude/Codex log files directly off disk (`~/.claude/projects`, `~/.codex`) — no extra instrumentation, all local.
+- AgentFleet's "session" (one PTY run) is reconciled against the CLI's own "session" (one conversation log) by matching the log session's timestamps to the AgentFleet session's `[created_at, ended_at]` window, so analytics stay scoped to that one run rather than the repo's whole log history.
+- 45 detection rules run against the scoped requests, producing anti-patterns grouped into 4 practice categories (Prompt Quality, Session Hygiene, Code Review, Tool Mastery), each independently scored.
+- Results are written to `session_analytics` (wrapped in `.catch()` — an analytics failure never affects session lifecycle, exit codes, or budget enforcement) and served via `GET /api/analytics/sessions/:id` to the **Analytics** tab.
+- Historical sessions can be backfilled with `apps/server/scripts/backfill-analytics.ts`.
