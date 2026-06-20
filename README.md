@@ -12,11 +12,11 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 
 ## ✨ Recently Shipped
 - **AI Coach analytics** (latest)
-  - New **Analytics** tab: per-session practice scorecards across 4 categories — Prompt Quality, Session Hygiene, Code Review, Tool Mastery
-  - 45 built-in detection rules (ported from [AI Engineering Coach](https://github.com/microsoft/AI-Engineering-Coach)) flag anti-patterns like runaway agent loops, late-night coding, lazy prompting, auto-model avoidance — each with severity, occurrence count, and a concrete suggestion
+  - New **Analytics** tab: per-session practice scorecards across 4 categories — Prompt Quality, Session Hygiene, Code Review, Tool Mastery — rendered as circular gauges with real WoW/MoM trend chips and sparklines (computed from the repo's own session history, not stubbed)
+  - 45 built-in detection rules (ported from [AI Engineering Coach](https://github.com/microsoft/AI-Engineering-Coach)) flag anti-patterns like runaway agent loops, late-night coding, lazy prompting, auto-model avoidance — each with severity, occurrence count, a concrete suggestion, and expandable real examples
   - Parses your own `~/.claude/projects` or `~/.codex` logs and scopes them to the exact AgentFleet session window — no duplicate/global stats
   - Backfillable: `pnpm --filter @agents_fleet/server exec tsx scripts/backfill-analytics.ts` analyzes any historical stopped sessions that predate this feature
-  - New **AI Coach Analytics** tab: cross-session dashboard over a date range — avg practice score, per-category trends, top anti-patterns across all sessions, an hour×weekday activity heatmap, a per-repo project breakdown, a session timeline, and an SDLC work-type split (bug fix / feature / refactor / docs / etc.)
+  - New **AI Coach Analytics** tab: cross-session dashboard over a date range, across 6 sub-tabs — Dashboard (avg practice score, per-category trends, top anti-patterns, daily activity, harness mix, token output/burndown), Patterns (hour×weekday activity heatmap, session calendar, per-repo breakdown), Timeline, SDLC work-type split, Skill Finder (underused harness features), and Context Health (AGENTS.md/file-context/devcontainer gaps)
   - Full breakdown: [AI_COACH.md](AI_COACH.md)
 - **AI session summary** (latest)
   - One-click plain-English summary of any session — title, what the agent did, and token/cost breakdown for the summary call

@@ -57,6 +57,11 @@ interface ClaudeLine {
   /** Subagent identifier on `subagents/` files. Present alongside
    *  `isSidechain: true`. Not used for billing math; surfaced for diagnostics. */
   agentId?: string;
+  /** True on the synthetic "This session is being continued from a previous
+   *  conversation..." line the CLI injects after auto-compaction. Authored
+   *  by the CLI, not the human — excluded from request parsing entirely so
+   *  it never pollutes prompt-quality/session-hygiene heuristics. */
+  isCompactSummary?: boolean;
   message?: ClaudeMessage;
 }
 
@@ -134,6 +139,7 @@ function isClaudeLine(value: unknown): value is ClaudeLine {
   if (value.entrypoint !== undefined && typeof value.entrypoint !== 'string') return false;
   if (value.isSidechain !== undefined && typeof value.isSidechain !== 'boolean') return false;
   if (value.agentId !== undefined && typeof value.agentId !== 'string') return false;
+  if (value.isCompactSummary !== undefined && typeof value.isCompactSummary !== 'boolean') return false;
   if (value.message !== undefined && !isClaudeMessage(value.message)) return false;
   return true;
 }
@@ -644,7 +650,7 @@ function parseClaudeSessionFile(filePath: string, wsId: string, wsName: string):
 
   while (i < lines.length) {
     const line = lines[i];
-    if (line.type !== 'user' || !userHasText(line)) {
+    if (line.type !== 'user' || !userHasText(line) || line.isCompactSummary) {
       i++;
       continue;
     }

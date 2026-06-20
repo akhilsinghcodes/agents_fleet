@@ -155,18 +155,28 @@ GET /api/analytics/sessions/:id
 
 Returns `404` if the session hasn't been analyzed yet (unknown harness, or no logs found in the session's time window).
 
+## Per-session view: gauges, trends, and examples
+
+The per-session **Analytics** tab renders each of the 4 scorecards as a circular gauge with a grade label (Great/Good/Fair/Poor), a WoW/MoM trend chip, and a 10-point sparkline. Trends are computed live, not stubbed: the API compares this session's score against the rolling average of the *same repo's* other analyzed sessions in the prior 7 days (WoW) and prior 30 days (MoM). Anti-patterns are grouped by category into collapsible sections, and each one that has matched examples (real flagged prompt/response snippets, capped by the rule's `examples` config) shows an expandable "N examples" row.
+
 ## Cross-session dashboard (AI Coach Analytics tab)
 
-While the per-session view above answers "how did this one session go," the **AI Coach Analytics** tab aggregates every analyzed session over a date range you pick:
+While the per-session view above answers "how did this one session go," the **AI Coach Analytics** tab aggregates every analyzed session over a date range you pick, across 6 sub-tabs: Dashboard, Patterns, Timeline, SDLC, Skill Finder, and Context Health.
 
 ```
-GET /api/ai-coach/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD   # avg score, per-category trends, top anti-patterns, daily activity, harness mix
-GET /api/ai-coach/patterns?from=...&to=...                  # hour × weekday request heatmap, calendar, per-repo project stats
-GET /api/ai-coach/timeline?from=...&to=...                  # most recent 200 sessions in range, with title/duration/score/cost
-GET /api/ai-coach/sdlc?from=...&to=...                       # work-type split (bug fix / feature / refactor / docs / config / code review / other) per request, overall and per-repo
+GET /api/ai-coach/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD     # avg score, per-category trends, top anti-patterns, daily activity, harness mix, token output/burndown
+GET /api/ai-coach/patterns?from=...&to=...                    # hour × weekday request heatmap, calendar, per-repo project stats
+GET /api/ai-coach/timeline?from=...&to=...                    # most recent 200 sessions in range, with title/duration/score/cost
+GET /api/ai-coach/sdlc?from=...&to=...                        # work-type split (bug fix / feature / refactor / docs / config / code review / other) per request, overall and per-repo
+GET /api/ai-coach/skill-finder?from=...&to=...                # underused harness features (skills, slash commands, plan mode, custom instructions, devcontainers, spec-driven workflows), ranked by occurrence
+GET /api/ai-coach/context-health?from=...&to=...              # single aggregate score + findings for context-engineering rules (AGENTS.md/CLAUDE.md, file references, devcontainers, spec structure)
 ```
 
-All four routes join `session_analytics` with `sessions` (and the `session_summary` artifact, for session titles), scoped to `s.created_at BETWEEN from AND to`, and exclude bare `zsh`/`bash` shell sessions. `workType` is a per-request classification already present on the parsed `SessionRequest` from the rule engine — no extra parsing pass needed.
+All six routes join `session_analytics` with `sessions` (and the `session_summary` artifact, for session titles), scoped to `s.created_at BETWEEN from AND to`, and exclude bare `zsh`/`bash` shell sessions. `workType` is a per-request classification already present on the parsed `SessionRequest` from the rule engine — no extra parsing pass needed.
+
+**Output / Burndown**: the Dashboard sub-tab also surfaces total input/output tokens and cost from the existing `sessions.estimated_input_tokens`/`estimated_output_tokens`/`estimated_cost_usd` columns (already populated by statusline parsing — see Spend Analytics), plus `budget_tokens`/`budget_usd` where a budget was set, giving a used/budget burndown view scoped to the same date range.
+
+**Skill Finder** and **Context Health** are computed entirely from anti-patterns already in `session_analytics.anti_patterns` — no new detectors. Skill Finder filters to feature-adoption rules (`no-skills`, `no-slash-commands`, `no-plan-mode`, `no-custom-instructions`, `no-devcontainer`, `no-spec-driven-development`, `agent-mode-for-asks`); Context Health filters to context-engineering rules (`context-engineering-gaps`, `no-file-context`, `excessive-file-context`, `no-custom-instructions`, `no-devcontainer`, `no-spec-structure`) and scores them with the same severity-weighted formula as the 4 main scorecards.
 
 ## Privacy & data flow
 
