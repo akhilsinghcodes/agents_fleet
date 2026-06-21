@@ -563,6 +563,8 @@ export interface AntiPattern {
   description: string;
   suggestion: string;
   examples: string[];
+  /** Same matched items as `examples`, but untruncated — for expand-on-click UI. */
+  examplesFull: string[];
   /** Rich per-occurrence details for timeline + session drilldown */
   details: OccurrenceDetail[];
   /** Weekly histogram: labels (ISO weeks) and counts per week */

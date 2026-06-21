@@ -137,6 +137,8 @@ export interface SessionAnalyticsAntiPattern {
   occurrences: number;
   description: string;
   suggestion: string;
+  examples: string[];
+  examplesFull: string[];
 }
 
 export type PracticeGroup =
@@ -152,6 +154,9 @@ export interface SessionAnalyticsGroupScore {
   topIssue: string | null;
   improvements: string[];
   patternCount: number;
+  wowPct: number;
+  momPct: number;
+  sparkline: number[];
 }
 
 export const PRACTICE_GROUP_LABELS: Record<PracticeGroup, string> = {
@@ -208,6 +213,14 @@ export interface AiCoachHarnessBreakdown {
   avgScore: number | null;
 }
 
+export interface AiCoachTokenStats {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  totalBudgetTokens: number;
+  totalBudgetUsd: number;
+}
+
 export interface AiCoachDashboardData {
   sessionCount: number;
   avgPracticeScore: number | null;
@@ -215,6 +228,39 @@ export interface AiCoachDashboardData {
   topAntiPatterns: AiCoachTopAntiPattern[];
   dailyActivity: AiCoachDailyActivity[];
   harnessBreakdown: AiCoachHarnessBreakdown[];
+  tokenStats: AiCoachTokenStats;
+}
+
+export interface AiCoachSkill {
+  id: string;
+  name: string;
+  group: PracticeGroup;
+  severity: "high" | "medium" | "low";
+  suggestion: string;
+  totalOccurrences: number;
+  sessionCount: number;
+}
+
+export interface AiCoachSkillFinderData {
+  sessionCount: number;
+  skills: AiCoachSkill[];
+}
+
+export interface AiCoachContextHealthFinding {
+  id: string;
+  name: string;
+  severity: "high" | "medium" | "low";
+  description: string;
+  suggestion: string;
+  totalOccurrences: number;
+  sessionCount: number;
+}
+
+export interface AiCoachContextHealthData {
+  sessionCount: number;
+  sessionsWithFindings: number;
+  score: number | null;
+  findings: AiCoachContextHealthFinding[];
 }
 
 export interface AiCoachProject {
@@ -293,6 +339,20 @@ export async function getAiCoachSdlc(from: string, to: string): Promise<AiCoachS
   const json = await parseJson<AiCoachSdlcData | ApiErrorShape>(res);
   if (isApiError(json)) throw new Error(json.error.message);
   return json as AiCoachSdlcData;
+}
+
+export async function getAiCoachSkillFinder(from: string, to: string): Promise<AiCoachSkillFinderData> {
+  const res = await fetch(`/api/ai-coach/skill-finder?${dateRangeParams(from, to)}`);
+  const json = await parseJson<AiCoachSkillFinderData | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as AiCoachSkillFinderData;
+}
+
+export async function getAiCoachContextHealth(from: string, to: string): Promise<AiCoachContextHealthData> {
+  const res = await fetch(`/api/ai-coach/context-health?${dateRangeParams(from, to)}`);
+  const json = await parseJson<AiCoachContextHealthData | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as AiCoachContextHealthData;
 }
 
 export async function getSession(id: string): Promise<Session> {

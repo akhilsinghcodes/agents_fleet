@@ -35,8 +35,8 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard" | "analytics" | "ai_coach";
-type CenterTab = "terminal" | "logs" | "artifacts";
+type LeftTab = "shell" | "claude_sdk" | "litellm" | "headroom_chat" | "headroom_shell" | "dashboard" | "ai_coach";
+type CenterTab = "terminal" | "logs" | "artifacts" | "analytics";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -406,7 +406,6 @@ function MainApp() {
     { key: "headroom_chat", label: "Headroom Chat" },
     { key: "headroom_shell", label: "Headroom Shell" },
     { key: "dashboard", label: "Spend Analytics" },
-    { key: "analytics", label: "Analytics" },
     { key: "ai_coach", label: "AI Coach Analytics" },
   ];
 
@@ -415,6 +414,7 @@ function MainApp() {
     terminal: "Terminal (live)",
     logs: "Terminal (persisted)",
     artifacts: "Artifacts",
+    analytics: "Analytics",
   };
 
   return (
@@ -571,8 +571,6 @@ function MainApp() {
                 />
               )}
             </Box>
-          ) : leftTab === "analytics" ? (
-            <AnalyticsContent sessionId={selectedId} />
           ) : leftTab === "ai_coach" ? (
             <AiCoachAnalyticsContent />
           ) : leftTab === "headroom_shell" ? (
@@ -761,7 +759,7 @@ function MainApp() {
                     bgcolor: "background.default",
                   }}
                 >
-                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map((tab) => (
+                  {(["terminal", "logs", "artifacts", "analytics"] as CenterTab[]).map((tab) => (
                     <Button
                       key={tab}
                       size="small"
@@ -787,7 +785,7 @@ function MainApp() {
                   ))}
                 </Box>
 
-                {/* Terminal / logs / artifacts */}
+                {/* Terminal / logs / artifacts / analytics */}
                 <Box sx={{ minHeight: 0, overflow: "hidden" }}>
                   {selectedId && centerTab === "terminal" && (
                     <TerminalPane sessionId={selectedId} ws={ws} active />
@@ -812,6 +810,11 @@ function MainApp() {
                           setSelectedId(newSessionId);
                         }}
                       />
+                    </Box>
+                  )}
+                  {selectedId && centerTab === "analytics" && (
+                    <Box sx={{ height: "100%", overflow: "auto" }}>
+                      <AnalyticsContent sessionId={selectedId} />
                     </Box>
                   )}
                   {!selectedId && (
@@ -990,7 +993,7 @@ function MainApp() {
                     bgcolor: "background.default",
                   }}
                 >
-                  {(["terminal", "logs", "artifacts"] as CenterTab[]).map((tab) => (
+                  {(["terminal", "logs", "artifacts", "analytics"] as CenterTab[]).map((tab) => (
                     <Button
                       key={tab}
                       size="small"
@@ -1016,7 +1019,7 @@ function MainApp() {
                   ))}
                 </Box>
 
-                {/* Terminal / logs / artifacts */}
+                {/* Terminal / logs / artifacts / analytics */}
                 <Box sx={{ minHeight: 0, overflow: "hidden" }}>
                   {selectedId && centerTab === "terminal" && (
                     <TerminalPane sessionId={selectedId} ws={ws} active />
@@ -1041,6 +1044,11 @@ function MainApp() {
                           setSelectedId(newSessionId);
                         }}
                       />
+                    </Box>
+                  )}
+                  {selectedId && centerTab === "analytics" && (
+                    <Box sx={{ height: "100%", overflow: "auto" }}>
+                      <AnalyticsContent sessionId={selectedId} />
                     </Box>
                   )}
                   {!selectedId && (

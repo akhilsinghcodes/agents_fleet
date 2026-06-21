@@ -31,6 +31,10 @@ interface AnalyticsRow {
   s_repo_path: string;
   s_command: string;
   s_estimated_cost_usd: number;
+  s_estimated_input_tokens: number;
+  s_estimated_output_tokens: number;
+  s_budget_tokens: number | null;
+  s_budget_usd: number | null;
   summary_content: string | null;
 }
 
@@ -43,12 +47,16 @@ const JOIN_QUERY = `
     sa.group_scores,
     sa.parsed_requests,
     sa.created_at,
-    s.created_at         AS s_created_at,
-    s.ended_at           AS s_ended_at,
-    s.repo_path          AS s_repo_path,
-    s.command            AS s_command,
-    s.estimated_cost_usd AS s_estimated_cost_usd,
-    art.content          AS summary_content
+    s.created_at                AS s_created_at,
+    s.ended_at                  AS s_ended_at,
+    s.repo_path                 AS s_repo_path,
+    s.command                   AS s_command,
+    s.estimated_cost_usd        AS s_estimated_cost_usd,
+    s.estimated_input_tokens    AS s_estimated_input_tokens,
+    s.estimated_output_tokens   AS s_estimated_output_tokens,
+    s.budget_tokens             AS s_budget_tokens,
+    s.budget_usd                AS s_budget_usd,
+    art.content                 AS summary_content
   FROM session_analytics sa
   JOIN sessions s ON s.id = sa.session_id
   LEFT JOIN session_artifacts art
@@ -56,6 +64,32 @@ const JOIN_QUERY = `
   WHERE s.created_at BETWEEN ? AND ?
     AND s.command NOT IN ('zsh', 'bash')
 `;
+
+// Rules that flag under-use of harness features (Skill Finder).
+const SKILL_FINDER_RULE_IDS = new Set([
+  "no-skills",
+  "no-slash-commands",
+  "no-plan-mode",
+  "no-custom-instructions",
+  "no-devcontainer",
+  "no-spec-driven-development",
+  "agent-mode-for-asks",
+]);
+
+// Rules that measure how well context is engineered for the agent (Context Health).
+const CONTEXT_HEALTH_RULE_IDS = new Set([
+  "context-engineering-gaps",
+  "no-file-context",
+  "excessive-file-context",
+  "no-custom-instructions",
+  "no-devcontainer",
+  "no-spec-structure",
+]);
+const CONTEXT_HEALTH_SEVERITY_PENALTY: Record<string, number> = {
+  high: 12,
+  medium: 7,
+  low: 3,
+};
 
 export function aiCoachAnalyticsRouter(): Router {
   const router = createRouter();
@@ -76,6 +110,13 @@ export function aiCoachAnalyticsRouter(): Router {
         topAntiPatterns: [],
         dailyActivity: [],
         harnessBreakdown: [],
+        tokenStats: {
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          totalCostUsd: 0,
+          totalBudgetTokens: 0,
+          totalBudgetUsd: 0,
+        },
       });
     }
 
@@ -155,6 +196,20 @@ export function aiCoachAnalyticsRouter(): Router {
       avgScore: scoreCount > 0 ? Math.round(scoreSum / scoreCount) : null,
     }));
 
+    // Output / Burndown token measures
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    let totalBudgetTokens = 0;
+    let totalBudgetUsd = 0;
+    for (const row of rows) {
+      totalInputTokens += row.s_estimated_input_tokens || 0;
+      totalOutputTokens += row.s_estimated_output_tokens || 0;
+      totalCostUsd += row.s_estimated_cost_usd || 0;
+      totalBudgetTokens += row.s_budget_tokens || 0;
+      totalBudgetUsd += row.s_budget_usd || 0;
+    }
+
     res.json({
       sessionCount: rows.length,
       avgPracticeScore,
@@ -162,6 +217,13 @@ export function aiCoachAnalyticsRouter(): Router {
       topAntiPatterns,
       dailyActivity,
       harnessBreakdown,
+      tokenStats: {
+        totalInputTokens,
+        totalOutputTokens,
+        totalCostUsd,
+        totalBudgetTokens,
+        totalBudgetUsd,
+      },
     });
   });
 
@@ -315,6 +377,90 @@ export function aiCoachAnalyticsRouter(): Router {
       workTypeCounts,
       workTypePct,
       byRepo,
+    });
+  });
+
+  // ── Skill Finder ────────────────────────────────────────────────────────────
+  // Surfaces harness features (skills, slash commands, plan mode, custom
+  // instructions, devcontainers, spec-driven workflows) that are underused
+  // across the date range, ranked by how often they were flagged.
+  router.get("/ai-coach/skill-finder", (req: Request, res: Response) => {
+    const range = parseDateRange(req);
+    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+
+    const db = getDb();
+    const rows = db.prepare(JOIN_QUERY).all(range.from, range.to) as AnalyticsRow[];
+
+    const totals: Record<
+      string,
+      { id: string; name: string; group: string; severity: string; suggestion: string; totalOccurrences: number; sessionCount: number }
+    > = {};
+    for (const row of rows) {
+      let patterns: { id: string; name: string; group: string; severity: string; suggestion: string; occurrences: number }[] = [];
+      try { patterns = JSON.parse(row.anti_patterns); } catch { continue; }
+      for (const p of patterns) {
+        if (!SKILL_FINDER_RULE_IDS.has(p.id)) continue;
+        if (!totals[p.id]) {
+          totals[p.id] = { id: p.id, name: p.name, group: p.group, severity: p.severity, suggestion: p.suggestion, totalOccurrences: 0, sessionCount: 0 };
+        }
+        totals[p.id].totalOccurrences += p.occurrences;
+        totals[p.id].sessionCount += 1;
+      }
+    }
+
+    const skills = Object.values(totals).sort(
+      (a, b) => b.sessionCount - a.sessionCount || b.totalOccurrences - a.totalOccurrences,
+    );
+
+    res.json({ sessionCount: rows.length, skills });
+  });
+
+  // ── Context Health ──────────────────────────────────────────────────────────
+  // Aggregates the context-engineering rule group into a single score, the
+  // same severity-weighted formula used for the per-session scorecards.
+  router.get("/ai-coach/context-health", (req: Request, res: Response) => {
+    const range = parseDateRange(req);
+    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+
+    const db = getDb();
+    const rows = db.prepare(JOIN_QUERY).all(range.from, range.to) as AnalyticsRow[];
+
+    const totals: Record<
+      string,
+      { id: string; name: string; severity: string; description: string; suggestion: string; totalOccurrences: number; sessionCount: number }
+    > = {};
+    let penalty = 0;
+    let sessionsWithFindings = 0;
+
+    for (const row of rows) {
+      let patterns: { id: string; name: string; severity: string; description: string; suggestion: string; occurrences: number }[] = [];
+      try { patterns = JSON.parse(row.anti_patterns); } catch { continue; }
+      let rowHasFinding = false;
+      for (const p of patterns) {
+        if (!CONTEXT_HEALTH_RULE_IDS.has(p.id)) continue;
+        rowHasFinding = true;
+        penalty += CONTEXT_HEALTH_SEVERITY_PENALTY[p.severity] ?? 5;
+        if (!totals[p.id]) {
+          totals[p.id] = { id: p.id, name: p.name, severity: p.severity, description: p.description, suggestion: p.suggestion, totalOccurrences: 0, sessionCount: 0 };
+        }
+        totals[p.id].totalOccurrences += p.occurrences;
+        totals[p.id].sessionCount += 1;
+      }
+      if (rowHasFinding) sessionsWithFindings += 1;
+    }
+
+    const maxPenalty = Math.max(rows.length, 1) * CONTEXT_HEALTH_RULE_IDS.size * 12;
+    const score = rows.length > 0 ? Math.max(0, Math.round(100 * (1 - penalty / maxPenalty))) : null;
+
+    const findings = Object.values(totals).sort(
+      (a, b) => b.sessionCount - a.sessionCount || b.totalOccurrences - a.totalOccurrences,
+    );
+
+    res.json({
+      sessionCount: rows.length,
+      sessionsWithFindings,
+      score,
+      findings,
     });
   });
 
