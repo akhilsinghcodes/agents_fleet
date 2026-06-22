@@ -444,5 +444,71 @@ export function dashboardRouter(): Router {
     }
   });
 
+  /**
+   * GET /api/dashboard/headroom/quota?url=<proxyUrl>
+   * Proxies to {url}/subscription-window and {url}/quota on the local headroom
+   * proxy. Returns { configured: false } if no url provided.
+   */
+  router.get("/dashboard/headroom/quota", async (req: Request, res: Response) => {
+    const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
+    if (!url) return res.json({ configured: false });
+
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({ error: { message: "Invalid headroom proxy URL" } });
+    }
+
+    try {
+      const base = url.replace(/\/$/, "");
+      const [subRes, quotaRes] = await Promise.all([
+        fetch(`${base}/subscription-window`, { signal: AbortSignal.timeout(3000) }),
+        fetch(`${base}/quota`, { signal: AbortSignal.timeout(3000) }),
+      ]);
+      const subscriptionWindow = subRes.ok ? await subRes.json() as Record<string, unknown> : null;
+      const quota = quotaRes.ok ? await quotaRes.json() as Record<string, unknown> : null;
+      return res.json({ configured: true, subscriptionWindow, quota });
+    } catch (e) {
+      return res.status(502).json({ error: { message: `Could not reach headroom proxy: ${String(e)}` } });
+    }
+  });
+
+  /**
+   * GET /api/dashboard/headroom/snapshots?limit=200
+   * Returns our own durable poll history of headroom's live-only metrics
+   * (subscription window, quota, stats), so trends survive even if
+   * headroom's own in-memory/JSON state resets or caps its history.
+   */
+  router.get("/dashboard/headroom/snapshots", (req: Request, res: Response) => {
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 200));
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, created_at, subscription_window, quota, stats
+         FROM headroom_snapshots
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{
+        id: string;
+        created_at: string;
+        subscription_window: string | null;
+        quota: string | null;
+        stats: string | null;
+      }>;
+
+    const snapshots = rows
+      .map((r) => ({
+        id: r.id,
+        createdAt: r.created_at,
+        subscriptionWindow: r.subscription_window ? JSON.parse(r.subscription_window) as unknown : null,
+        quota: r.quota ? JSON.parse(r.quota) as unknown : null,
+        stats: r.stats ? JSON.parse(r.stats) as unknown : null,
+      }))
+      .reverse();
+
+    return res.json({ snapshots });
+  });
+
   return router;
 }

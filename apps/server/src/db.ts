@@ -111,6 +111,22 @@ export function getDb(): Db {
 
     CREATE INDEX IF NOT EXISTS idx_session_analytics_harness
       ON session_analytics(harness);
+
+    -- Periodic poll of the headroom proxy's live-only metrics
+    -- (/subscription-window, /quota, /stats). Headroom keeps these in
+    -- memory and in its own JSON files under ~/.headroom, which can be
+    -- lost (restarts, history caps); this table is our durable copy so the
+    -- dashboard can show trends even after headroom forgets.
+    CREATE TABLE IF NOT EXISTS headroom_snapshots (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      subscription_window TEXT NULL,
+      quota TEXT NULL,
+      stats TEXT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_headroom_snapshots_created_at
+      ON headroom_snapshots(created_at);
   `);
 
   // Migrations (sessions columns)
