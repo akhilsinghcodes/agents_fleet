@@ -639,6 +639,58 @@ export type HeadroomStatsResponse =
       };
     };
 
+export type HeadroomRateLimitWindow = {
+  used: number;
+  limit: number;
+  utilization_pct: number;
+  resets_at: string | null;
+  synthesized?: boolean;
+  resets_at_estimated?: boolean;
+  render_warning?: string;
+};
+
+export type HeadroomQuotaResponse =
+  | { configured: false }
+  | {
+      configured: true;
+      subscriptionWindow: {
+        latest?: {
+          five_hour?: HeadroomRateLimitWindow;
+          seven_day?: HeadroomRateLimitWindow;
+          seven_day_opus?: HeadroomRateLimitWindow;
+        };
+      } | null;
+      quota: Record<string, Record<string, unknown> | null> | null;
+    };
+
+export async function getHeadroomQuota(proxyUrl: string): Promise<HeadroomQuotaResponse> {
+  const res = await fetch(`/api/dashboard/headroom/quota?url=${encodeURIComponent(proxyUrl)}`);
+  const json = await parseJson<HeadroomQuotaResponse | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as HeadroomQuotaResponse;
+}
+
+export type HeadroomSnapshot = {
+  id: string;
+  createdAt: string;
+  subscriptionWindow: {
+    latest?: {
+      five_hour?: HeadroomRateLimitWindow;
+      seven_day?: HeadroomRateLimitWindow;
+      seven_day_opus?: HeadroomRateLimitWindow;
+    };
+  } | null;
+  quota: Record<string, Record<string, unknown> | null> | null;
+  stats: Record<string, unknown> | null;
+};
+
+export async function getHeadroomSnapshots(limit = 200): Promise<HeadroomSnapshot[]> {
+  const res = await fetch(`/api/dashboard/headroom/snapshots?limit=${limit}`);
+  const json = await parseJson<{ snapshots: HeadroomSnapshot[] } | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return (json as { snapshots: HeadroomSnapshot[] }).snapshots;
+}
+
 export async function getHeadroomStats(proxyUrl: string): Promise<HeadroomStatsResponse> {
   const res = await fetch(`/api/dashboard/headroom/stats?url=${encodeURIComponent(proxyUrl)}`);
   const json = await parseJson<HeadroomStatsResponse | ApiErrorShape>(res);

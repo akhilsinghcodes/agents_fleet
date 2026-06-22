@@ -468,7 +468,7 @@ Headroom is a transparent context compression proxy that reduces tokens sent to 
 
 **Setup:** `pnpm dev:one` handles everything automatically:
 - Installs `headroom-ai` via pip if not present (prompts once)
-- Downloads the `kompress-base` compression model from HuggingFace (one-time, ~first run)
+- Downloads the `kompress-v2-base` compression model from HuggingFace (one-time, ~first run)
 - Starts the proxy on `http://localhost:8787` before the app
 - Routes all Headroom tab calls through the proxy → your `LITELLM_BASE_URL`
 
