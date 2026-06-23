@@ -62,17 +62,29 @@ HEADROOM_PID=""
 
 # HuggingFace caches models at ~/.cache/huggingface/hub/models--<org>--<name>
 HF_CACHE_DIR="${HF_HOME:-${HOME}/.cache/huggingface}/hub"
-KOMPRESS_CACHE="$HF_CACHE_DIR/models--chopratejas--kompress-base"
+KOMPRESS_CACHE="$HF_CACHE_DIR/models--chopratejas--kompress-v2-base"
 
 ensure_kompress_model() {
   if [ -d "$KOMPRESS_CACHE" ]; then
-    echo "[agents_fleet] kompress-base model already cached -- enabling HF_HUB_OFFLINE"
+    echo "[agents_fleet] kompress-v2-base model already cached -- enabling HF_HUB_OFFLINE"
+    export HF_HUB_OFFLINE=1
+    return
+  fi
+
+  echo "[agents_fleet] kompress-v2-base model not found in cache -- downloading from HuggingFace (one-time, ~260MB)..."
+  # The proxy itself only loads Kompress lazily on the first compressible
+  # request (it never eager-loads at startup), so without this step the
+  # model would silently never download until real traffic happened to
+  # trigger it. Fetch it directly via headroom's own loader so it's ready
+  # before the proxy starts.
+  if "$REPO_ROOT/.venv/bin/python" -c "
+from headroom.transforms.kompress_compressor import _load_kompress
+_load_kompress(allow_download=True)
+" >/dev/null 2>&1; then
+    echo "[agents_fleet] kompress-v2-base model downloaded and cached."
     export HF_HUB_OFFLINE=1
   else
-    echo "[agents_fleet] kompress-base model not found in cache -- downloading from HuggingFace (one-time)..."
-    # headroom downloads the model on first proxy start; just let it run online this once.
-    # HF_HUB_OFFLINE stays unset so the download succeeds.
-    echo "[agents_fleet] Future runs will use the local cache (no HuggingFace calls)."
+    echo "[agents_fleet] WARNING: could not pre-download kompress-v2-base model; it will be fetched lazily on first compressible request instead."
   fi
 }
 
@@ -86,7 +98,9 @@ launch_headroom() {
     sleep 1
   fi
 
-  # Ensure torch is installed (needed for ML compression). Uses pip cache after first download.
+  mkdir -p "$REPO_ROOT/data/headroom"
+
+  # Install torch if missing (uses pip cache after first run — fast no-op on repeat)
   local VENV_PIP_CMD="$REPO_ROOT/.venv/bin/pip"
   if [ -f "$VENV_PIP_CMD" ] && ! "$REPO_ROOT/.venv/bin/python" -c "import torch" >/dev/null 2>&1; then
     echo "[agents_fleet] Installing torch for ML compression (cached after first run)..."
@@ -104,8 +118,9 @@ launch_headroom() {
   TOKENIZERS_PARALLELISM=false \
   OPENAI_TARGET_API_URL="${LITELLM_BASE_URL:-}" \
   OPENAI_API_KEY="${LITELLM_API_KEY:-}" \
-  "$HEADROOM_CMD" proxy --port "$HEADROOM_PORT" \
+  "${HEADROOM_CMD:-headroom}" proxy --port "$HEADROOM_PORT" --no-telemetry \
     --memory \
+    --memory-db-path "$REPO_ROOT/data/headroom/memory.db" \
     --log-file "$REPO_ROOT/data/headroom-requests.jsonl" \
   >"$REPO_ROOT/data/headroom.log" 2>&1 &
   HEADROOM_PID=$!
@@ -128,19 +143,19 @@ launch_headroom() {
 }
 
 start_headroom() {
-  # Check for headroom in venv or system PATH
+  # Prefer .venv for isolation, but fall back to system headroom
+  export HEADROOM_CMD=""
+
+  # If .venv exists with headroom, use it
   if [ -f "$REPO_ROOT/.venv/bin/headroom" ]; then
     export HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
-  elif command -v headroom >/dev/null 2>&1; then
-    export HEADROOM_CMD="headroom"
-  else
-    export HEADROOM_CMD=""
-  fi
-
-  if [ -n "$HEADROOM_CMD" ]; then
     ensure_kompress_model
     launch_headroom
-  else
+    return
+  fi
+
+  # If .venv doesn't exist but we want to set it up, prompt for install
+  if [ ! -d "$REPO_ROOT/.venv" ] || [ ! -f "$REPO_ROOT/.venv/bin/pip" ]; then
     printf "%s" "[agents_fleet] headroom not found. Install it now? [Y/n]: "
     if [ -r /dev/tty ]; then
       read -r answer </dev/tty || answer="n"
@@ -218,54 +233,32 @@ start_headroom() {
         VENV_PIP="$REPO_ROOT/.venv/bin/pip"
 
         echo "[agents_fleet] Installing headroom dependencies from requirements.txt..."
-        INSTALL_LOG=$(mktemp)
-
-        if "$VENV_PIP" install -r "$REPO_ROOT/requirements.txt" >"$INSTALL_LOG" 2>&1; then
+        if "$VENV_PIP" install -r "$REPO_ROOT/requirements.txt" >/dev/null 2>&1; then
           echo "[agents_fleet] ✓ headroom dependencies installed successfully"
           # Update HEADROOM_CMD to use venv version
           HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
           ensure_kompress_model
           launch_headroom
         else
-          echo ""
           echo "[agents_fleet] ERROR: pip install failed"
-          echo "[agents_fleet] Error output:"
-          cat "$INSTALL_LOG" | sed 's/^/  /'
-          echo ""
-          printf "%s" "[agents_fleet] Retry? [y/N]: "
-          if [ -r /dev/tty ]; then
-            read -r retry_answer </dev/tty || retry_answer="n"
+          echo "[agents_fleet] Attempting to use system headroom instead..."
+          if command -v headroom >/dev/null 2>&1; then
+            export HEADROOM_CMD="headroom"
+            ensure_kompress_model
+            launch_headroom
           else
-            read -r retry_answer || retry_answer="n"
+            echo "[agents_fleet] Skipping headroom setup"
           fi
-
-          case "$retry_answer" in
-            [yY]*)
-              if "$VENV_PIP" install --upgrade pip >/dev/null 2>&1; then
-                if "$VENV_PIP" install "headroom-ai" "httpx[http2]" >"$INSTALL_LOG" 2>&1; then
-                  echo "[agents_fleet] ✓ headroom-ai installed successfully"
-                  HEADROOM_CMD="$REPO_ROOT/.venv/bin/headroom"
-                  ensure_kompress_model
-                  launch_headroom
-                else
-                  echo "[agents_fleet] Installation failed again. Skipping headroom setup"
-                fi
-              fi
-              ;;
-            *)
-              echo ""
-              echo "[agents_fleet] To install manually:"
-              echo "  source .venv/bin/activate"
-              echo "  pip install headroom-ai httpx[http2]"
-              echo ""
-              echo "[agents_fleet] Skipping headroom setup"
-              ;;
-          esac
         fi
-
-        rm -f "$INSTALL_LOG"
         ;;
     esac
+  else
+    # .venv exists but no headroom installed in it - try system headroom
+    if command -v headroom >/dev/null 2>&1; then
+      export HEADROOM_CMD="headroom"
+      ensure_kompress_model
+      launch_headroom
+    fi
   fi
 }
 

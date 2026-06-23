@@ -14,9 +14,14 @@ import {
     getDashboardByModel,
     getDashboardByRepo,
     getDashboardStats,
+    getHeadroomQuota,
     getHeadroomRequests,
+    getHeadroomSnapshots,
     getLiteLLMSpend,
+    type HeadroomQuotaResponse,
+    type HeadroomRateLimitWindow,
     type HeadroomRequestRow,
+    type HeadroomSnapshot,
     type LiteLLMDailyActivity,
     type LiteLLMSpendLog,
 } from "./api";
@@ -1338,14 +1343,175 @@ function HeadroomRequestsTable() {
   );
 }
 
+const HEADROOM_PROXY_BASE = "http://localhost:8787";
+
+function HeadroomWindowBar({ label, win }: { label: string; win?: HeadroomRateLimitWindow }) {
+  if (!win) return null;
+  const pct = Math.min(100, Math.max(0, win.utilization_pct));
+  const color = pct >= 90 ? "#dc2626" : pct >= 70 ? "#d97706" : "#16a34a";
+  const resetsAt = win.resets_at ? new Date(win.resets_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  return (
+    <Box sx={{ mb: 1.5 }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+        <Typography fontSize={13} fontWeight={600}>{label}</Typography>
+        <Typography fontSize={12} color="text.secondary">
+          {win.used.toLocaleString()} / {win.limit.toLocaleString()} ({pct.toFixed(1)}%)
+        </Typography>
+      </Box>
+      <Box sx={{ height: 8, borderRadius: 1, bgcolor: "rgba(0,0,0,0.06)", overflow: "hidden" }}>
+        <Box sx={{ height: "100%", width: `${pct}%`, bgcolor: color, transition: "width 0.3s" }} />
+      </Box>
+      <Typography fontSize={11} color="text.secondary" mt={0.25}>
+        Resets {resetsAt}{win.resets_at_estimated ? " (estimated)" : ""}
+      </Typography>
+    </Box>
+  );
+}
+
+function HeadroomSnapshotHistory() {
+  const [snapshots, setSnapshots] = useState<HeadroomSnapshot[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getHeadroomSnapshots(100)
+      .then((s) => { if (alive) setSnapshots(s); })
+      .catch((e) => { if (alive) setError(String(e)); });
+    return () => { alive = false; };
+  }, []);
+
+  if (error) return null;
+  const rows = snapshots.filter((s) => s.subscriptionWindow?.latest?.five_hour || s.quota);
+  if (rows.length === 0) {
+    return (
+      <Typography fontSize={12} color="text.secondary" mt={1}>
+        No persisted history yet — snapshots are recorded every 5 minutes while the server runs,
+        even if headroom's own state resets.
+      </Typography>
+    );
+  }
+
+  return (
+    <Box mt={1}>
+      <Typography fontSize={12} fontWeight={600} color="text.secondary" mb={0.5}>
+        Persisted history ({rows.length} snapshots, polled every 5 min — survives headroom restarts)
+      </Typography>
+      <Box sx={{ overflow: "auto", maxHeight: 220 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+          <thead>
+            <tr>
+              {["Time", "5h util%", "7d util%"].map((h) => (
+                <th key={h} style={{ position: "sticky", top: 0, background: "#f8fafc", padding: "4px 8px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#64748b" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice().reverse().map((s) => {
+              const fiveHour = s.subscriptionWindow?.latest?.five_hour;
+              const sevenDay = s.subscriptionWindow?.latest?.seven_day;
+              return (
+                <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td style={{ padding: "3px 8px", color: "#64748b", whiteSpace: "nowrap" }}>
+                    {new Date(s.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td style={{ padding: "3px 8px" }}>{fiveHour ? `${fiveHour.utilization_pct.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: "3px 8px" }}>{sevenDay ? `${sevenDay.utilization_pct.toFixed(1)}%` : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Box>
+    </Box>
+  );
+}
+
+function HeadroomQuotaPanel() {
+  const [data, setData] = useState<HeadroomQuotaResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const poll = () => {
+      getHeadroomQuota(HEADROOM_PROXY_BASE)
+        .then((d) => { if (alive) { setData(d); setError(null); } })
+        .catch((e) => { if (alive) setError(String(e)); });
+    };
+    poll();
+    const id = setInterval(poll, 10000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  if (error) return <Typography p={2.5} fontSize={13} color="error">{error}</Typography>;
+  if (!data) return <Typography p={2.5} fontSize={13} color="text.secondary">Loading…</Typography>;
+  if (!data.configured) {
+    return <Typography p={2.5} fontSize={13} color="text.secondary">Headroom proxy not configured.</Typography>;
+  }
+
+  const latest = data.subscriptionWindow?.latest;
+  const quota = data.quota;
+  const hasSubscription = !!latest && (latest.five_hour || latest.seven_day || latest.seven_day_opus);
+  // The subscription tracker also registers itself as a quota provider under
+  // this key, which would just re-dump the same raw state already shown above
+  // in "Claude Subscription Window" -- exclude it to avoid the duplicate/confusing entry.
+  const quotaEntries = quota
+    ? Object.entries(quota).filter(([key, v]) => v !== null && key !== "subscription_window")
+    : [];
+
+  return (
+    <Box sx={{ p: 2.5, overflow: "auto", flex: 1 }}>
+      <Typography fontSize={14} fontWeight={700} mb={1.5}>Claude Subscription Window</Typography>
+      {hasSubscription ? (
+        <Paper variant="outlined" sx={{ p: 2, mb: 1, maxWidth: 480 }}>
+          <HeadroomWindowBar label="5-hour window" win={latest?.five_hour} />
+          <HeadroomWindowBar label="7-day window" win={latest?.seven_day} />
+          <HeadroomWindowBar label="7-day Opus window" win={latest?.seven_day_opus} />
+        </Paper>
+      ) : (
+        <Typography fontSize={13} color="text.secondary" mb={1}>
+          Subscription tracking is not enabled (not signed in via Claude subscription OAuth, or no usage observed yet).
+        </Typography>
+      )}
+      <Box maxWidth={480} mb={3}>
+        <HeadroomSnapshotHistory />
+      </Box>
+
+      <Typography fontSize={14} fontWeight={700} mb={1.5}>Provider Quota</Typography>
+      {quotaEntries.length === 0 ? (
+        <Typography fontSize={13} color="text.secondary">No quota data reported by any provider yet.</Typography>
+      ) : (
+        <Stack spacing={2}>
+          {quotaEntries.map(([key, stats]) => (
+            <Paper key={key} variant="outlined" sx={{ p: 2, maxWidth: 480 }}>
+              <Typography fontSize={13} fontWeight={600} mb={1} sx={{ textTransform: "capitalize" }}>{key}</Typography>
+              <Box component="table" sx={{ width: "100%", fontSize: 12 }}>
+                <tbody>
+                  {Object.entries(stats ?? {}).map(([k, v]) => (
+                    <tr key={k}>
+                      <td style={{ padding: "2px 8px 2px 0", color: "#64748b" }}>{k}</td>
+                      <td style={{ padding: "2px 0", fontFamily: "ui-monospace, monospace" }}>
+                        {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Box>
+            </Paper>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
 function HeadroomSection() {
-  const [tab, setTab] = useState<"dashboard" | "requests">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "requests" | "quota">("dashboard");
 
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {/* Subtab bar */}
       <Box sx={{ display: "flex", gap: 0.25, px: 2, py: 0.75, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
-        {(["dashboard", "requests"] as const).map((key) => (
+        {(["dashboard", "requests", "quota"] as const).map((key) => (
           <Box
             key={key}
             onClick={() => setTab(key)}
@@ -1357,7 +1523,7 @@ function HeadroomSection() {
               "&:hover": { bgcolor: tab === key ? "primary.50" : "action.hover" },
             }}
           >
-            {key === "dashboard" ? "Headroom Dashboard" : "Request Log"}
+            {key === "dashboard" ? "Headroom Dashboard" : key === "requests" ? "Request Log" : "Subscription & Quota"}
           </Box>
         ))}
       </Box>
@@ -1370,6 +1536,7 @@ function HeadroomSection() {
         />
       )}
       {tab === "requests" && <HeadroomRequestsTable />}
+      {tab === "quota" && <HeadroomQuotaPanel />}
     </Box>
   );
 }

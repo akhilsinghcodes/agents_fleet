@@ -9,6 +9,7 @@ import { dashboardRouter } from "./routes/dashboard";
 import { analyticsRouter } from "./routes/analytics";
 import { aiCoachAnalyticsRouter } from "./routes/aiCoachAnalytics";
 import { getValidModelIds } from "./litellm";
+import { startHeadroomSnapshotPoller } from "./headroom-snapshot-poller";
 
 export type AgentsFleetServer = {
   app: Express;
@@ -41,6 +42,8 @@ export function createApp(): AgentsFleetServer {
   app.use("/api", dashboardRouter());
   app.use("/api", analyticsRouter());
   app.use("/api", aiCoachAnalyticsRouter());
+
+  startHeadroomSnapshotPoller();
 
   return { app, hub, processManager };
 }

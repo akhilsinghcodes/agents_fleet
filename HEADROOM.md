@@ -2,7 +2,7 @@
 
 Headroom is a local context-compression proxy that sits between Agents Fleet and
 your LiteLLM endpoint. It intercepts each chat request, runs a compression pass
-over the message history using an on-device ONNX model (kompress-base), and
+over the message history using an on-device ONNX model (kompress-v2-base), and
 forwards the compressed prompt to LiteLLM. Only the compressed text leaves the
 machine. The full, uncompressed conversation is never sent anywhere.
 
@@ -37,7 +37,7 @@ find each piece of the implementation in the source tree.
 1. You send a message in the Headroom tab.
 2. The Agents Fleet server appends it to the conversation transcript and POSTs
    the full history to http://localhost:8787/v1/chat/completions (the proxy).
-3. The proxy loads the kompress-base ONNX model (already on disk after first run)
+3. The proxy loads the kompress-v2-base ONNX model (already on disk after first run)
    and runs a semantic compression pass over the message history.
 4. Compression only fires when the context window exceeds 500 tokens. Shorter
    conversations pass through unchanged.
@@ -63,7 +63,7 @@ Agents Fleet server  (apps/server/src/routes/litellm.ts)
         v
 Headroom proxy  (http://localhost:8787)
         |
-        | semantic compression (kompress-base, ONNX, local CPU/GPU)
+        | semantic compression (kompress-v2-base, ONNX, local CPU/GPU)
         | POST /v1/chat/completions
         v
 LiteLLM  (LITELLM_BASE_URL)
@@ -92,8 +92,8 @@ The script (scripts/dev) does the following in order:
 3. Runs pnpm install if node_modules is absent.
 4. Checks whether headroom is on PATH.
    - If not, prompts to install it: pip install headroom-ai httpx[http2]
-5. Checks whether kompress-base is cached at
-   ~/.cache/huggingface/hub/models--chopratejas--kompress-base
+5. Checks whether kompress-v2-base is cached at
+   ~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base
    - If not cached, starts the proxy online so it can download the model
      from HuggingFace (one-time, ~several hundred MB).
    - If already cached, sets HF_HUB_OFFLINE=1 before starting the proxy.
@@ -338,8 +338,8 @@ to the headroom-ai documentation (https://github.com/chopratejas/headroom).
 
 All compression runs entirely on your machine:
 
-- The kompress-base model is a local ONNX file cached at
-  ~/.cache/huggingface/hub/models--chopratejas--kompress-base.
+- The kompress-v2-base model is a local ONNX file cached at
+  ~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base.
 - After the first run (model download), HF_HUB_OFFLINE=1 is set so no further
   HuggingFace network calls are made.
 - HEADROOM_TELEMETRY=off is set unconditionally by scripts/dev; the proxy sends
@@ -380,7 +380,7 @@ What stays local:
 | Dev runner (install + launch)        | scripts/dev                                               |
 | Proxy log file                       | data/headroom.log (runtime, gitignored)                   |
 | Persistent savings                   | ~/.headroom/proxy_savings.json (outside repo)             |
-| Model cache                          | ~/.cache/huggingface/hub/models--chopratejas--kompress-base |
+| Model cache                          | ~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base |
 
 
 ## Known limitations and gotchas
