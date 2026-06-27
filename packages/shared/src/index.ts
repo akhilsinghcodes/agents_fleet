@@ -37,12 +37,15 @@ export type SessionArtifact = {
   content: string;
 };
 
+export type CavemanLevel = "lite" | "full" | "ultra" | "wenyan";
+
 export type CreateSessionRequest = {
   repoPath: string;
   command: string;
   budgetUsd?: number;
   budgetTokens?: number;
   headroom?: boolean;
+  cavemanLevel?: CavemanLevel | null;
 };
 
 export type CreateClaudeSdkSessionRequest = {

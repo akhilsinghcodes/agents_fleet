@@ -1,10 +1,10 @@
 import type {
-    CreateClaudeSdkSessionRequest,
-    CreateLiteLlmSessionRequest,
-    CreateSessionRequest,
-    LogRow,
-    Session,
-    SessionArtifact,
+  CreateClaudeSdkSessionRequest,
+  CreateLiteLlmSessionRequest,
+  CreateSessionRequest,
+  LogRow,
+  Session,
+  SessionArtifact,
 } from "@agents_fleet/shared";
 
 export type ApiErrorShape = { error: { message: string } };
@@ -87,6 +87,25 @@ export type DashboardDaySpend = {
   spend: number;
   isFuture: boolean;
   isToday: boolean;
+};
+
+export type CavemanLevelStat = {
+  level: string;
+  session_count: number;
+  total_output_tokens: number;
+  total_cost: number;
+  tokens_saved_estimate: number;
+  savings_rate: number;
+};
+
+export type CavemanStats = {
+  by_level: CavemanLevelStat[];
+  totals: {
+    session_count: number;
+    total_output_tokens: number;
+    total_cost: number;
+    tokens_saved_estimate: number;
+  };
 };
 
 export type DashboardAlerts = {
@@ -186,6 +205,8 @@ export async function getSessionAnalytics(
   if (!res.ok) throw new Error("Request failed");
   return json;
 }
+
+// ── AI Coach Analytics ────────────────────────────────────────────────────────
 
 export interface AiCoachGroupAverage {
   group: PracticeGroup;
@@ -565,6 +586,12 @@ export async function getDashboardByModel(from: string, to: string): Promise<{ m
   return json as { models: DashboardModelStat[] };
 }
 
+export async function getCavemanStats(): Promise<CavemanStats> {
+  const res = await fetch("/api/dashboard/caveman/stats");
+  if (!res.ok) throw new Error(`getCavemanStats: ${res.status}`);
+  return res.json();
+}
+
 export async function getDashboardAlerts(from: string, to: string): Promise<DashboardAlerts> {
   const res = await fetch(dashboardUrl("alerts", from, to));
   const json = await parseJson<DashboardAlerts | ApiErrorShape>(res);
@@ -639,6 +666,29 @@ export type HeadroomStatsResponse =
       };
     };
 
+export async function getHeadroomStats(proxyUrl: string): Promise<HeadroomStatsResponse> {
+  const res = await fetch(`/api/dashboard/headroom/stats?url=${encodeURIComponent(proxyUrl)}`);
+  const json = await parseJson<HeadroomStatsResponse | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as HeadroomStatsResponse;
+}
+
+export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLMSpendResponse> {
+  const res = await fetch(`/api/dashboard/litellm/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const json = await parseJson<LiteLLMSpendResponse | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as LiteLLMSpendResponse;
+}
+
+export type SessionSummary = { title: string; summary: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
+
+export async function generateSessionSummary(sessionId: string): Promise<SessionSummary> {
+  const res = await fetch(`/api/sessions/${sessionId}/summary`, { method: "POST" });
+  const json = await parseJson<SessionSummary | ApiErrorShape>(res);
+  if (isApiError(json)) throw new Error(json.error.message);
+  return json as SessionSummary;
+}
+
 export type HeadroomRateLimitWindow = {
   used: number;
   limit: number;
@@ -690,14 +740,6 @@ export async function getHeadroomSnapshots(limit = 200): Promise<HeadroomSnapsho
   if (isApiError(json)) throw new Error(json.error.message);
   return (json as { snapshots: HeadroomSnapshot[] }).snapshots;
 }
-
-export async function getHeadroomStats(proxyUrl: string): Promise<HeadroomStatsResponse> {
-  const res = await fetch(`/api/dashboard/headroom/stats?url=${encodeURIComponent(proxyUrl)}`);
-  const json = await parseJson<HeadroomStatsResponse | ApiErrorShape>(res);
-  if (isApiError(json)) throw new Error(json.error.message);
-  return json as HeadroomStatsResponse;
-}
-
 export type HeadroomRequestRow = {
   request_id: string;
   timestamp: string;
@@ -721,20 +763,3 @@ export async function getHeadroomRequests(limit = 500): Promise<HeadroomRequestR
   if (isApiError(json)) throw new Error(json.error.message);
   return (json as { rows: HeadroomRequestRow[] }).rows;
 }
-
-export async function getLiteLLMSpend(from: string, to: string): Promise<LiteLLMSpendResponse> {
-  const res = await fetch(`/api/dashboard/litellm/spend?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-  const json = await parseJson<LiteLLMSpendResponse | ApiErrorShape>(res);
-  if (isApiError(json)) throw new Error(json.error.message);
-  return json as LiteLLMSpendResponse;
-}
-
-export type SessionSummary = { title: string; summary: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null };
-
-export async function generateSessionSummary(sessionId: string): Promise<SessionSummary> {
-  const res = await fetch(`/api/sessions/${sessionId}/summary`, { method: "POST" });
-  const json = await parseJson<SessionSummary | ApiErrorShape>(res);
-  if (isApiError(json)) throw new Error(json.error.message);
-  return json as SessionSummary;
-}
-

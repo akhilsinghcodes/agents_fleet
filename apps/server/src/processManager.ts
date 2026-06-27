@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 import type { Session, SessionStatus } from "@agents_fleet/shared";
 import pty, { type IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import { getDb } from "./db";
@@ -52,6 +54,9 @@ type RunningSession = {
   codexLastPersistAtMs?: number;
   claudeLastPersistAtMs?: number;
 
+  // For resume sessions: baseline captured from the first AF tick so we store deltas.
+  resumeBaseline?: { in: number; out: number; cost: number };
+
   // Debug instrumentation (optional).
   _lastCodexDebugAtMs?: number;
   _lastClaudeDebugAtMs?: number;
@@ -59,6 +64,16 @@ type RunningSession = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function debugLog(msg: string): void {
+  const logPath = path.resolve(process.cwd(), "..", "..", "data", "resume-debug.log");
+  const line = `[${nowIso()}] ${msg}\n`;
+  try {
+    fs.appendFileSync(logPath, line, "utf-8");
+  } catch {
+    // ignore
+  }
 }
 
 function sanitizePtyUserInputForTokenEstimate(raw: string): string {
@@ -122,15 +137,17 @@ function parseCodexUsageTotalsFromText(
 
   // Status line parsing (best-effort). Supports K/M suffixes.
   // We want the *last* occurrence in the buffer (TUI redraws can leave stale copies).
-  const re =
-    /\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*in\b[\s\S]*?\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*out\b/gi;
-  let last: RegExpExecArray | null = null;
-  for (;;) {
-    const m2 = re.exec(cleanText);
-    if (!m2) break;
-    last = m2;
+  // "in" and "out" are matched independently: some codex TUI status-line configs
+  // omit the "X in" segment entirely when input tokens are 0, so "in" must be optional.
+  function lastMatch(re: RegExp): RegExpExecArray | null {
+    let last: RegExpExecArray | null = null;
+    for (;;) {
+      const m2 = re.exec(cleanText);
+      if (!m2) break;
+      last = m2;
+    }
+    return last;
   }
-  if (!last) return null;
 
   function parseCompact(num: string, suffix: string): number {
     const n = Number(num);
@@ -141,8 +158,12 @@ function parseCodexUsageTotalsFromText(
     return Math.round(n);
   }
 
-  const input = parseCompact(last[1], last[2]);
-  const output = parseCompact(last[3], last[4]);
+  const inMatch = lastMatch(/\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*in\b/gi);
+  const outMatch = lastMatch(/\b([0-9]+(?:\.[0-9]+)?)([KM]?)\s*out\b/gi);
+  if (!outMatch) return null;
+
+  const input = inMatch ? parseCompact(inMatch[1], inMatch[2]) : 0;
+  const output = parseCompact(outMatch[1], outMatch[2]);
   if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
   return { input, output, source: "status" };
 }
@@ -327,6 +348,10 @@ function _parseClaudeStatusLineFromText(cleanText: string): {
   };
 }
 
+function isClaudeCmd(cmd: string | undefined): boolean {
+  return cmd === "claude" || (cmd?.startsWith("claude ") ?? false);
+}
+
 function shouldCaptureGitOnEnd(): boolean {
   // Opt-in by default. Set AGENTS_FLEET_CAPTURE_GIT_ON_END=0/false/no to disable.
   const v = process.env.AGENTS_FLEET_CAPTURE_GIT_ON_END;
@@ -456,27 +481,57 @@ export class ProcessManager {
       // Only accept updates for Claude PTY sessions for MVP.
       const rawCmd = session.command.trim();
       const effectiveCmd = rawCmd.startsWith("[headroom-shell]:")
-        ? rawCmd.slice("[headroom-shell]:".length)
-        : rawCmd;
-      if (effectiveCmd !== "claude") return;
+          ? rawCmd.slice("[headroom-shell]:".length)
+          : rawCmd;
+      if (!isClaudeCmd(effectiveCmd)) return;
+
+      const running = this.running.get(sessionId);
+      const isResume =
+        effectiveCmd.includes("--resume") || effectiveCmd.includes(" resume ");
+
+      debugLog(`applyUsageTick sessionId=${sessionId} isResume=${isResume} rawCmd=${rawCmd}`);
+
+      // For resume sessions, capture the first tick as a baseline so we store
+      // only the delta (cost/tokens spent in this session, not the full history).
+      if (isResume && running && !running.resumeBaseline) {
+        running.resumeBaseline = {
+          in: tick.inputTokens,
+          out: tick.outputTokens,
+          cost: tick.costUsd ?? 0,
+        };
+        debugLog(`  baseline CAPTURED in=${running.resumeBaseline.in} out=${running.resumeBaseline.out} cost=${running.resumeBaseline.cost}`);
+      }
+
+      const baseline = (isResume && running?.resumeBaseline) ? running.resumeBaseline : null;
+      const effectiveIn  = baseline ? Math.max(0, tick.inputTokens  - baseline.in)  : tick.inputTokens;
+      const effectiveOut = baseline ? Math.max(0, tick.outputTokens - baseline.out) : tick.outputTokens;
+      const effectiveCost = baseline
+        ? Math.max(0, (tick.costUsd ?? 0) - baseline.cost)
+        : (tick.costUsd ?? null);
+
+      if (baseline) {
+        debugLog(`  delta calc: raw_in=${tick.inputTokens} baseline_in=${baseline.in} effective_in=${effectiveIn} | raw_out=${tick.outputTokens} baseline_out=${baseline.out} effective_out=${effectiveOut}`);
+      } else if (isResume) {
+        debugLog(`  no baseline yet, storing raw values: in=${tick.inputTokens} out=${tick.outputTokens}`);
+      }
 
       // Trust the client-rendered statusline as authoritative. Take the max for
       // each field so transient zero/lower readings don't clobber real values.
       const nextCost =
-        typeof tick.costUsd === "number"
-          ? Math.max(session.estimated_cost_usd, tick.costUsd)
+        typeof effectiveCost === "number"
+          ? Math.max(session.estimated_cost_usd, effectiveCost)
           : session.estimated_cost_usd;
-      const nextIn = Math.max(session.estimated_input_tokens, tick.inputTokens);
-      const nextOut = Math.max(
-        session.estimated_output_tokens,
-        tick.outputTokens,
-      );
+      const nextIn = Math.max(session.estimated_input_tokens, effectiveIn);
+      const nextOut = Math.max(session.estimated_output_tokens, effectiveOut);
+
+      debugLog(`  storing to DB: nextIn=${nextIn} nextOut=${nextOut} nextCost=${nextCost}`);
 
       if (
         nextCost === session.estimated_cost_usd &&
         nextIn === session.estimated_input_tokens &&
         nextOut === session.estimated_output_tokens
       ) {
+        debugLog(`  no change, skipping DB update`);
         return;
       }
 
@@ -485,6 +540,8 @@ export class ProcessManager {
         estimated_input_tokens: nextIn,
         estimated_output_tokens: nextOut,
       });
+
+      debugLog(`  DB updated: id=${sessionId}`);
 
       if (updated) this.hub.broadcastSession(updated);
       void this.enforceBudget(sessionId, updated ?? session);
@@ -559,6 +616,7 @@ export class ProcessManager {
     cols?: number;
     rows?: number;
     headroom?: boolean;
+    cavemanLevel?: string | null;
   }) {
     const cols = args.cols ?? 120;
     const rows = args.rows ?? 30;
@@ -568,24 +626,41 @@ export class ProcessManager {
       env.LANG ??= "en_US.UTF-8";
       env.TERM ??= "xterm-256color";
     }
+
     if (args.headroom) {
       env.ANTHROPIC_BASE_URL = "http://localhost:8787";
       env.OPENAI_BASE_URL = "http://localhost:8787/v1";
     }
-    if (args.headroom) {
-      env.ANTHROPIC_BASE_URL = "http://localhost:8787";
-      env.OPENAI_BASE_URL = "http://localhost:8787/v1";
-    }
+
 
     const shell =
       process.platform === "win32"
         ? "cmd.exe"
         : env.SHELL || (os.platform() === "darwin" ? "/bin/zsh" : "/bin/bash");
 
+    const cavemanPrompts: Record<string, string> = {
+      lite: "Drop filler words and pleasantries. Be direct and concise but remain grammatically clear.",
+      full: "Respond in compressed telegraphic language. Drop articles, filler words, pronouns where inferable. Preserve all technical accuracy. Example: 'Fixed auth bug in middleware. Tests pass. Deploy ready.'",
+      ultra: "Max compression. Telegraph style. No articles/pronouns/filler. Technical terms only. Abbrev freely. Example: 'Auth fix done. Tests pass.'",
+      wenyan: "Respond in classical Chinese (文言文) style — maximally compressed, archaic register. Use only where precision is preserved.",
+    };
+
+    let resolvedCommand = args.command;
+    if (args.cavemanLevel && cavemanPrompts[args.cavemanLevel]) {
+      const rawPrompt = cavemanPrompts[args.cavemanLevel];
+      if (isClaudeCmd(args.command)) {
+        const prompt = rawPrompt.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        resolvedCommand = `${args.command} --append-system-prompt "${prompt}"`;
+      } else if (args.command.trim() === "codex" || args.command.trim().startsWith("codex ")) {
+        const prompt = rawPrompt.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        resolvedCommand = `${args.command} -c developer_instructions="${prompt}"`;
+      }
+    }
+
     const shellArgs =
       process.platform === "win32"
-        ? ["/c", args.command]
-        : ["-lc", args.command];
+        ? ["/c", resolvedCommand]
+        : ["-lc", resolvedCommand];
 
     const p = pty.spawn(shell, shellArgs, {
       cwd: args.repoPath,
@@ -618,15 +693,17 @@ export class ProcessManager {
     })();
 
     if (args.headroom) {
-      headroomStatsPoller = setInterval(() => {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 2000);
-        fetch("http://localhost:8787/stats", { signal: ctrl.signal })
-          .then((r) => r.ok ? r.json() : null)
-          .catch(() => null)
-          .finally(() => clearTimeout(t));
-        // Stats fetched for future use. Token tracking for headroom-shell claude
-        // sessions is handled by the AF status line parser via applyUsageTick.
+      headroomStatsPoller = setInterval(async () => {
+        try {
+          const res = await fetch("http://localhost:8787/stats");
+          if (!res.ok) return;
+          // Stats are fetched here for future use (e.g. compression savings display).
+          // Token tracking for headroom-shell claude sessions is handled by the
+          // AF status line parser, so we intentionally do not call applyUsageTick.
+          await res.json();
+        } catch {
+          // ignore transient fetch failures
+        }
       }, 3000);
     }
 
@@ -642,7 +719,7 @@ export class ProcessManager {
       // values with a lower computed cost.
       const r = this.running.get(args.sessionId);
       const cmd = r?.command?.trim();
-      if (cmd === "codex" || cmd === "claude") return;
+      if (cmd === "codex" || isClaudeCmd(cmd)) return;
 
       const outputTokens = estimateTokens(clean);
       if (outputTokens <= 0) return;
@@ -757,7 +834,7 @@ export class ProcessManager {
           }
         }
       } else {
-        if (cmd === "claude") {
+        if (isClaudeCmd(cmd)) {
           // Parse the Agents Fleet statusline line out of the PTY stream.
           // Format: "[AF] in=<n> out=<n> cost=$<usd> [/AF]"
           const cleanChunk = stripAnsi(data);
@@ -804,7 +881,7 @@ export class ProcessManager {
           }
         }
         // Skip handleOutputText for claude (authoritative AF tick handles it).
-        if (cmd !== "claude") void handleOutputText(data);
+        if (!isClaudeCmd(cmd)) void handleOutputText(data);
       }
     });
 
@@ -889,7 +966,7 @@ export class ProcessManager {
         // ignore
       }
 
-      if (running.command.trim() === "claude") {
+      if (isClaudeCmd(running.command.trim())) {
         await this.gracefullyExitClaude(running, sessionId);
       } else if (running.command.trim() === "codex") {
         await this.gracefullyExitCodex(running, sessionId);
@@ -1026,7 +1103,7 @@ export class ProcessManager {
     // stdin keystrokes here would clobber that cost with a tiny estimate.
     const running = this.running.get(sessionId);
     const cmd = running?.command?.trim();
-    if (cmd === "codex" || cmd === "claude") return await getSession(sessionId);
+    if (cmd === "codex" || isClaudeCmd(cmd)) return await getSession(sessionId);
 
     // Arrow keys and other navigation keys come through as ANSI escape sequences like "\x1B[A".
     // Backspace comes through as "\x7F" or "\b". These are not model input tokens and should

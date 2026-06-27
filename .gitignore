@@ -53,3 +53,7 @@ screenshots/*.mov
 .env.local
 .venv
 data/headroom-requests.jsonl
+
+# Local Claude Code skill installs
+.agents/
+skills-lock.json
