@@ -15,10 +15,12 @@ import {
     getDashboardByRepo,
     getDashboardStats,
     getHeadroomQuota,
-    getHeadroomRequests,
     getHeadroomSnapshots,
     getLiteLLMSpend,
+    getCavemanStats,
+    type CavemanStats,
     type HeadroomQuotaResponse,
+    getHeadroomRequests,
     type HeadroomRateLimitWindow,
     type HeadroomRequestRow,
     type HeadroomSnapshot,
@@ -154,9 +156,9 @@ function presetRange(preset: Preset): { from: string; to: string } {
   if (preset === "last_week") {
     const thisWeekStart = utcWeekStart(now);
     const lastWeekEnd = new Date(thisWeekStart);
-    lastWeekEnd.setUTCDate(thisWeekStart.getUTCDate() - 1);
+    lastWeekEnd.setUTCDate(thisWeekStart.getUTCDate() - 1); // last Sunday UTC
     const lastWeekStart = new Date(lastWeekEnd);
-    lastWeekStart.setUTCDate(lastWeekEnd.getUTCDate() - 6);
+    lastWeekStart.setUTCDate(lastWeekEnd.getUTCDate() - 6); // last Monday UTC
     return { from: toUTCDateStr(lastWeekStart), to: toUTCDateStr(lastWeekEnd) };
   }
   if (preset === "month") {
@@ -998,296 +1000,20 @@ function DashboardHeader({
   );
 }
 
-// ── LiteLLM Spend Tab ─────────────────────────────────────────────────────────
+// ── Headroom Section ──────────────────────────────────────────────────────────
 
-function LiteLLMTab({
-  from, to, preset, onPreset,
-}: {
-  from: string; to: string;
-  preset: Preset; onPreset: (p: Preset) => void;
-}) {
-  const [data, setData] = useState<{ spendLogs: LiteLLMSpendLog[]; activity: LiteLLMDailyActivity | null } | null>(null);
+function HeadroomRequestsTable() {
+  const [rows, setRows] = useState<HeadroomRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notConfigured, setNotConfigured] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    getLiteLLMSpend(from, to)
-      .then((res) => {
-        if (!res.configured) { setNotConfigured(true); return; }
-        setNotConfigured(false);
-        setData({ spendLogs: res.spendLogs, activity: res.activity });
-      })
+    getHeadroomRequests(500)
+      .then((rows) => setRows(rows))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [from, to]);
-
-  type DailyResult = NonNullable<LiteLLMDailyActivity["results"]>[number];
-
-  const dailyResults: DailyResult[] = data?.activity?.results ?? [];
-  const totalSpend = dailyResults.reduce((s, r) => s + r.metrics.spend, 0);
-  const totalRequests = dailyResults.reduce((s, r) => s + r.metrics.api_requests, 0);
-  const totalPrompt = dailyResults.reduce((s, r) => s + r.metrics.prompt_tokens, 0);
-  const totalCompletion = dailyResults.reduce((s, r) => s + r.metrics.completion_tokens, 0);
-
-  const byModel = new Map<string, number>();
-  for (const log of data?.spendLogs ?? []) {
-    for (const [model, cost] of Object.entries(log.models ?? {})) {
-      byModel.set(model, (byModel.get(model) ?? 0) + cost);
-    }
-  }
-  const modelRows = [...byModel.entries()].sort((a, b) => b[1] - a[1]);
-  const chartData = [...dailyResults].sort((a, b) => a.date.localeCompare(b.date))
-    .map((r) => ({ date: r.date, spend: r.metrics.spend }));
-
-  const presets: { key: Preset; label: string }[] = [
-    { key: "today", label: "Today" },
-    { key: "this_week", label: "This Week" },
-    { key: "last_week", label: "Last Week" },
-    { key: "month", label: "Month" },
-    { key: "ytd", label: "YTD" },
-  ];
-
-  return (
-    <>
-      {/* Header Paper — identical structure to Agents Fleet DashboardHeader */}
-      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0 }}>
-        <Box sx={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "stretch" }}>
-          <Box p={3}>
-            <Box display="flex" alignItems="center" gap={1.5} mb={2}>
-              <Typography variant="h6" fontWeight={700}>Spend Analytics</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {new Date(`${from}T00:00:00`).toLocaleDateString()} – {new Date(`${to}T00:00:00`).toLocaleDateString()}
-              </Typography>
-            </Box>
-            <Box display="flex" alignItems="center" gap={1} mb={2}>
-              <ButtonGroup size="small" variant="outlined">
-                {presets.map((p) => (
-                  <Button key={p.key} variant={preset === p.key ? "contained" : "outlined"}
-                    disableElevation onClick={() => onPreset(p.key)}>{p.label}</Button>
-                ))}
-              </ButtonGroup>
-            </Box>
-            {data && (
-              <Stack direction="row" gap={4} flexWrap="wrap">
-                <StatCard label="Total Spend" value={`$${fmt(totalSpend)}`} />
-                <StatCard label="Requests" value={fmtTokens(totalRequests)} />
-                <StatCard label="Prompt Tokens" value={fmtTokens(totalPrompt)} />
-                <StatCard label="Completion Tokens" value={fmtTokens(totalCompletion)} />
-              </Stack>
-            )}
-          </Box>
-          {/* THIS WEEK chart — same position as Agents Fleet */}
-          {chartData.length > 0 && (
-            <Box sx={{ borderLeft: 1, borderColor: "divider", p: 2 }}>
-              <Typography variant="caption" fontWeight={600} color="text.secondary"
-                textTransform="uppercase" letterSpacing="0.07em" display="block" mb={1}>
-                This Week
-              </Typography>
-              <ResponsiveContainer width="100%" height={110}>
-                <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="20%">
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => {
-                    const d = new Date(v); return d.toLocaleDateString("en-US", { weekday: "short" });
-                  }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <RechartsTooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Spend"]}
-                    labelFormatter={(l: string) => new Date(`${l}T00:00:00`).toLocaleDateString()} />
-                  <Bar dataKey="spend" fill="#6366f1" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </Box>
-          )}
-        </Box>
-      </Paper>
-
-      {/* Weekly Budget strip — computed from LiteLLM daily data */}
-      {data && dailyResults.length > 0 && (() => {
-        const WEEKLY_BUDGET = 200;
-        const now = new Date();
-        // Week = Monday 00:00 UTC → Sunday 23:59 UTC, matching LiteLLM's reset boundary
-        const weekStart = utcWeekStart(now);
-        const weekEnd = new Date(weekStart); weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
-        const weekStartStr = toUTCDateStr(weekStart);
-        const weekEndStr = toUTCDateStr(weekEnd);
-        const daysElapsed = Math.min(7, Math.max(1, Math.floor((now.getTime() - weekStart.getTime()) / 86400000) + 1));
-        const weekSpend = dailyResults.filter(r => r.date >= weekStartStr && r.date <= weekEndStr)
-          .reduce((s, r) => s + r.metrics.spend, 0);
-        const dailyAvg = weekSpend / daysElapsed;
-        const projected = dailyAvg * 7;
-        const pct = Math.round((weekSpend / WEEKLY_BUDGET) * 100);
-        const willExceed = projected > WEEKLY_BUDGET;
-        const pctColor: "error" | "warning" | "primary" = pct >= 90 ? "error" : pct >= 70 ? "warning" : "primary";
-        return (
-          <Paper variant="outlined" sx={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto",
-            alignItems: "center", gap: 3.5, px: 3, py: 2, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
-            <Box>
-              <Typography fontWeight={600} fontSize={13}>Weekly Budget</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {daysElapsed} of 7 days · {weekStartStr} – {weekEndStr}
-              </Typography>
-            </Box>
-            <Box>
-              <Box display="flex" justifyContent="space-between" mb={0.75}>
-                <Typography fontSize={13}>
-                  <Typography component="span" fontWeight={700}>${fmt(weekSpend)}</Typography>
-                  <Typography component="span" color="text.secondary"> / ${fmt(WEEKLY_BUDGET)}</Typography>
-                </Typography>
-                <Typography fontSize={13} fontWeight={600} color={`${pctColor}.main`}>{pct}%</Typography>
-              </Box>
-              <LinearProgress variant="determinate" value={Math.min(100, pct)} color={pctColor} sx={{ height: 8, borderRadius: 4 }} />
-            </Box>
-            <Stack direction="row" gap={4}>
-              {[
-                { label: "Avg / day", value: `$${fmt(dailyAvg)}`, alert: false },
-                { label: "Projected", value: `$${fmt(projected)}`, alert: willExceed },
-                { label: "Remaining", value: `$${fmt(Math.max(0, WEEKLY_BUDGET - weekSpend))}`, alert: false },
-              ].map(({ label, value, alert }) => (
-                <Box key={label} textAlign="right">
-                  <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
-                  <Typography fontSize={18} fontWeight={700} color={alert ? "error.main" : "text.primary"} lineHeight={1.3}>{value}</Typography>
-                </Box>
-              ))}
-            </Stack>
-            <Chip icon={willExceed ? <WarningAmberIcon fontSize="small" /> : <CheckCircleOutlineIcon fontSize="small" />}
-              label={willExceed ? "Over budget" : "On track"} color={willExceed ? "error" : "success"}
-              variant="outlined" sx={{ fontWeight: 600 }} />
-          </Paper>
-        );
-      })()}
-
-      {notConfigured && (
-        <Alert severity="info" sx={{ m: 2 }}>
-          LiteLLM is not configured. Set <code>LITELLM_BASE_URL</code> and <code>LITELLM_API_KEY</code> to enable spend tracking.
-        </Alert>
-      )}
-      {error && <Alert severity="error" sx={{ m: 2 }}>{error}</Alert>}
-      {loading && <Box p={4} display="flex" justifyContent="center"><CircularProgress size={28} /></Box>}
-
-      {data && !loading && <LiteLLMContent
-        modelRows={modelRows} dailyResults={dailyResults} totalSpend={totalSpend}
-      />}
-    </>
-  );
-}
-
-type LiteLLMDailyRow = { date: string; metrics: { spend: number; prompt_tokens: number; completion_tokens: number; api_requests: number; total_tokens: number } };
-
-function LiteLLMContent({ modelRows, dailyResults, totalSpend }: {
-  modelRows: [string, number][];
-  dailyResults: LiteLLMDailyRow[];
-  totalSpend: number;
-}) {
-  const [tab, setTab] = useState<"by_model" | "daily">("by_model");
-  const tabs = [{ key: "by_model" as const, label: "By Model" }, { key: "daily" as const, label: "Daily" }];
-
-  return (
-    <>
-      {/* Tab bar — same style as Agents Fleet */}
-      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0, px: 2, display: "flex", gap: 0 }}>
-        {tabs.map(({ key, label }) => (
-          <Button key={key} size="small" onClick={() => setTab(key)} disableRipple sx={{
-            borderRadius: 0, px: 2, py: 1.5,
-            fontWeight: tab === key ? 700 : 400,
-            color: tab === key ? "primary.main" : "text.secondary",
-            borderBottom: 2,
-            borderColor: tab === key ? "primary.main" : "transparent",
-            textTransform: "none", fontSize: 13,
-            "&:hover": { bgcolor: "action.hover" },
-          }}>{label}</Button>
-        ))}
-      </Paper>
-
-      {/* Content */}
-      <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
-        <Paper variant="outlined" sx={{ minHeight: "100%", borderRadius: 2, overflow: "hidden" }}>
-
-          {tab === "by_model" && (
-            <Box p={2}>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600 }}>Model</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>% of Total</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {modelRows.map(([model, spend]) => (
-                      <TableRow key={model} hover>
-                        <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{model || "—"}</TableCell>
-                        <TableCell align="right" sx={{ fontSize: 12 }}>${fmt(spend, 4)}</TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, justifyContent: "flex-end" }}>
-                            <LinearProgress variant="determinate"
-                              value={totalSpend > 0 ? Math.min((spend / totalSpend) * 100, 100) : 0}
-                              sx={{ width: 60, height: 6, borderRadius: 3 }} />
-                            <Typography variant="caption" sx={{ minWidth: 28, textAlign: "right" }}>
-                              {totalSpend > 0 ? Math.round((spend / totalSpend) * 100) : 0}%
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
-
-          {tab === "daily" && (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>Requests</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>Prompt Tokens</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>Completion Tokens</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {[...dailyResults].sort((a, b) => b.date.localeCompare(a.date)).map((r) => (
-                    <TableRow key={r.date} hover>
-                      <TableCell sx={{ fontSize: 12 }}>{r.date}</TableCell>
-                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.api_requests)}</TableCell>
-                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.prompt_tokens)}</TableCell>
-                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.completion_tokens)}</TableCell>
-                      <TableCell align="right" sx={{ fontSize: 12, fontWeight: 600 }}>${fmt(r.metrics.spend, 4)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-
-          {dailyResults.length === 0 && (
-            <Box p={3}><Typography color="text.secondary" fontSize={13}>No spend data found for this period.</Typography></Box>
-          )}
-        </Paper>
-      </Box>
-    </>
-  );
-}
-
-// ── Main Dashboard ────────────────────────────────────────────────────────────
-
-type DashTab = "by_repo" | "by_command" | "by_model";
-
-
-function HeadroomRequestsTable() {
-  const [rows, setRows] = useState<HeadroomRequestRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    getHeadroomRequests(500)
-      .then((r) => { setRows(r); setLoading(false); })
-      .catch((e) => { setError(String(e)); setLoading(false); });
   }, []);
 
   if (loading) return <Typography p={2.5} fontSize={13} color="text.secondary">Loading…</Typography>;
@@ -1299,50 +1025,38 @@ function HeadroomRequestsTable() {
   );
 
   return (
-    <Box sx={{ overflow: "auto", flex: 1 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-        <thead>
-          <tr style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
-            {["Timestamp", "Model", "Provider", "In (orig)", "In (opt)", "Saved", "Savings %", "Out", "Latency", "Cache", "Status"].map((h) => (
-              <th key={h} style={{ padding: "6px 10px", textAlign: "left", borderBottom: "1px solid #e2e8f0", fontWeight: 600, fontSize: 11, color: "#64748b", whiteSpace: "nowrap" }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const ts = new Date(row.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-            const saved = row.tokens_saved > 0;
-            return (
-              <tr key={row.request_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                <td style={{ padding: "5px 10px", color: "#64748b", whiteSpace: "nowrap" }}>{ts}</td>
-                <td style={{ padding: "5px 10px", whiteSpace: "nowrap" }}>{row.model}</td>
-                <td style={{ padding: "5px 10px", color: "#64748b" }}>{row.provider}</td>
-                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.input_tokens_original.toLocaleString()}</td>
-                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.input_tokens_optimized.toLocaleString()}</td>
-                <td style={{ padding: "5px 10px", textAlign: "right", color: saved ? "#16a34a" : "#94a3b8", fontWeight: saved ? 600 : 400 }}>
-                  {saved ? `−${row.tokens_saved.toLocaleString()}` : "—"}
-                </td>
-                <td style={{ padding: "5px 10px", textAlign: "right", color: saved ? "#16a34a" : "#94a3b8" }}>
-                  {saved ? `${row.savings_percent.toFixed(1)}%` : "—"}
-                </td>
-                <td style={{ padding: "5px 10px", textAlign: "right" }}>{row.output_tokens.toLocaleString()}</td>
-                <td style={{ padding: "5px 10px", textAlign: "right", color: "#64748b" }}>{row.total_latency_ms.toFixed(0)}ms</td>
-                <td style={{ padding: "5px 10px", textAlign: "center" }}>{row.cache_hit ? <span style={{ color: "#2563eb" }}>✓</span> : "—"}</td>
-                <td style={{ padding: "5px 10px" }}>
-                  {row.error
-                    ? <span style={{ color: "#dc2626" }}>error</span>
-                    : <span style={{ color: "#16a34a" }}>ok</span>
-                  }
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </Box>
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ bgcolor: "action.hover" }}>
+            <TableCell sx={{ fontWeight: 700, fontSize: 12 }}>Model</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12 }}>Input (orig→opt)</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12 }}>Output</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12 }}>Saved</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12 }}>Savings %</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12 }}>Latency</TableCell>
+            <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12 }}>Cache</TableCell>
+            <TableCell sx={{ fontWeight: 700, fontSize: 12 }}>Status</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((row, i) => (
+            <TableRow key={i} sx={{ "&:hover": { bgcolor: "action.hover" } }}>
+              <TableCell sx={{ fontSize: 12 }}>{row.model}</TableCell>
+              <TableCell align="right" sx={{ fontSize: 12 }}>{row.input_tokens_original}→{row.input_tokens_optimized}</TableCell>
+              <TableCell align="right" sx={{ fontSize: 12 }}>{row.output_tokens}</TableCell>
+              <TableCell align="right" sx={{ fontSize: 12, color: "success.main", fontWeight: 600 }}>{row.tokens_saved}</TableCell>
+              <TableCell align="right" sx={{ fontSize: 12, color: row.savings_percent > 0 ? "success.main" : "text.secondary" }}>{row.savings_percent.toFixed(1)}%</TableCell>
+              <TableCell align="right" sx={{ fontSize: 12 }}>{row.total_latency_ms}ms</TableCell>
+              <TableCell align="center" sx={{ fontSize: 12 }}>{row.cache_hit ? "✓" : "—"}</TableCell>
+              <TableCell sx={{ fontSize: 12, color: row.error ? "error.main" : "success.main" }}>{row.error ? "error" : "ok"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
-
 const HEADROOM_PROXY_BASE = "http://localhost:8787";
 
 function HeadroomWindowBar({ label, win }: { label: string; win?: HeadroomRateLimitWindow }) {
@@ -1504,22 +1218,26 @@ function HeadroomQuotaPanel() {
   );
 }
 
+
 function HeadroomSection() {
   const [tab, setTab] = useState<"dashboard" | "requests" | "quota">("dashboard");
 
   return (
-    <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {/* Subtab bar */}
-      <Box sx={{ display: "flex", gap: 0.25, px: 2, py: 0.75, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+    <Box sx={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+      <Box sx={{ display: "flex", gap: 0.5, px: 2, py: 1.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
         {(["dashboard", "requests", "quota"] as const).map((key) => (
           <Box
             key={key}
             onClick={() => setTab(key)}
             sx={{
-              px: 1.5, py: 0.5, borderRadius: 1, fontSize: 13, fontWeight: tab === key ? 600 : 400,
+              px: 1.5,
+              py: 0.75,
+              fontSize: 13,
+              fontWeight: tab === key ? 600 : 500,
               color: tab === key ? "primary.main" : "text.secondary",
               bgcolor: tab === key ? "primary.50" : "transparent",
-              cursor: "pointer", textTransform: "capitalize",
+              cursor: "pointer",
+              textTransform: "capitalize",
               "&:hover": { bgcolor: tab === key ? "primary.50" : "action.hover" },
             }}
           >
@@ -1541,8 +1259,306 @@ function HeadroomSection() {
   );
 }
 
+// ── LiteLLM Spend Tab ─────────────────────────────────────────────────────────
+
+function LiteLLMTab({
+  from, to, preset, onPreset,
+}: {
+  from: string; to: string;
+  preset: Preset; onPreset: (p: Preset) => void;
+}) {
+  const [data, setData] = useState<{ spendLogs: LiteLLMSpendLog[]; activity: LiteLLMDailyActivity | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getLiteLLMSpend(from, to)
+      .then((res) => {
+        if (!res.configured) { setNotConfigured(true); return; }
+        setNotConfigured(false);
+        setData({ spendLogs: res.spendLogs, activity: res.activity });
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  type DailyResult = NonNullable<LiteLLMDailyActivity["results"]>[number];
+
+  const dailyResults: DailyResult[] = data?.activity?.results ?? [];
+  const totalSpend = dailyResults.reduce((s, r) => s + r.metrics.spend, 0);
+  const totalRequests = dailyResults.reduce((s, r) => s + r.metrics.api_requests, 0);
+  const totalPrompt = dailyResults.reduce((s, r) => s + r.metrics.prompt_tokens, 0);
+  const totalCompletion = dailyResults.reduce((s, r) => s + r.metrics.completion_tokens, 0);
+
+  const byModel = new Map<string, number>();
+  for (const log of data?.spendLogs ?? []) {
+    for (const [model, cost] of Object.entries(log.models ?? {})) {
+      byModel.set(model, (byModel.get(model) ?? 0) + cost);
+    }
+  }
+  const modelRows = [...byModel.entries()].sort((a, b) => b[1] - a[1]);
+  const chartData = [...dailyResults].sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({ date: r.date, spend: r.metrics.spend }));
+
+  const presets: { key: Preset; label: string }[] = [
+    { key: "today", label: "Today" },
+    { key: "this_week", label: "This Week" },
+    { key: "last_week", label: "Last Week" },
+    { key: "month", label: "Month" },
+    { key: "ytd", label: "YTD" },
+  ];
+
+  return (
+    <>
+      {/* Header Paper — identical structure to Agents Fleet DashboardHeader */}
+      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "stretch" }}>
+          <Box p={3}>
+            <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+              <Typography variant="h6" fontWeight={700}>Spend Analytics</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {new Date(`${from}T00:00:00`).toLocaleDateString()} – {new Date(`${to}T00:00:00`).toLocaleDateString()}
+              </Typography>
+            </Box>
+            <Box display="flex" alignItems="center" gap={1} mb={2}>
+              <ButtonGroup size="small" variant="outlined">
+                {presets.map((p) => (
+                  <Button key={p.key} variant={preset === p.key ? "contained" : "outlined"}
+                    disableElevation onClick={() => onPreset(p.key)}>{p.label}</Button>
+                ))}
+              </ButtonGroup>
+            </Box>
+            {data && (
+              <Stack direction="row" gap={4} flexWrap="wrap">
+                <StatCard label="Total Spend" value={`$${fmt(totalSpend)}`} />
+                <StatCard label="Requests" value={fmtTokens(totalRequests)} />
+                <StatCard label="Prompt Tokens" value={fmtTokens(totalPrompt)} />
+                <StatCard label="Completion Tokens" value={fmtTokens(totalCompletion)} />
+              </Stack>
+            )}
+          </Box>
+          {/* THIS WEEK chart — same position as Agents Fleet */}
+          {chartData.length > 0 && (
+            <Box sx={{ borderLeft: 1, borderColor: "divider", p: 2 }}>
+              <Typography variant="caption" fontWeight={600} color="text.secondary"
+                textTransform="uppercase" letterSpacing="0.07em" display="block" mb={1}>
+                This Week
+              </Typography>
+              <ResponsiveContainer width="100%" height={110}>
+                <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="20%">
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => {
+                    const d = new Date(v); return d.toLocaleDateString("en-US", { weekday: "short" });
+                  }} axisLine={false} tickLine={false} />
+                  <YAxis hide />
+                  <RechartsTooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Spend"]}
+                    labelFormatter={(l: string) => new Date(`${l}T00:00:00`).toLocaleDateString()} />
+                  <Bar dataKey="spend" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Weekly Budget strip — computed from LiteLLM daily data */}
+      {data && dailyResults.length > 0 && (() => {
+        const WEEKLY_BUDGET = 200;
+        const now = new Date();
+        // Week = Monday 00:00 UTC → Sunday 23:59 UTC, matching LiteLLM's reset boundary
+        const weekStart = utcWeekStart(now);
+        const weekEnd = new Date(weekStart); weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+        const weekStartStr = toUTCDateStr(weekStart);
+        const weekEndStr = toUTCDateStr(weekEnd);
+        const daysElapsed = Math.min(7, Math.max(1, Math.floor((now.getTime() - weekStart.getTime()) / 86400000) + 1));
+        const weekSpend = dailyResults.filter(r => r.date >= weekStartStr && r.date <= weekEndStr)
+          .reduce((s, r) => s + r.metrics.spend, 0);
+        const dailyAvg = weekSpend / daysElapsed;
+        const projected = dailyAvg * 7;
+        const pct = Math.round((weekSpend / WEEKLY_BUDGET) * 100);
+        const willExceed = projected > WEEKLY_BUDGET;
+        const pctColor: "error" | "warning" | "primary" = pct >= 90 ? "error" : pct >= 70 ? "warning" : "primary";
+        return (
+          <Paper variant="outlined" sx={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto",
+            alignItems: "center", gap: 3.5, px: 3, py: 2, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
+            <Box>
+              <Typography fontWeight={600} fontSize={13}>Weekly Budget</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {daysElapsed} of 7 days · {weekStartStr} – {weekEndStr}
+              </Typography>
+            </Box>
+            <Box>
+              <Box display="flex" justifyContent="space-between" mb={0.75}>
+                <Typography fontSize={13}>
+                  <Typography component="span" fontWeight={700}>${fmt(weekSpend)}</Typography>
+                  <Typography component="span" color="text.secondary"> / ${fmt(WEEKLY_BUDGET)}</Typography>
+                </Typography>
+                <Typography fontSize={13} fontWeight={600} color={`${pctColor}.main`}>{pct}%</Typography>
+              </Box>
+              <LinearProgress variant="determinate" value={Math.min(100, pct)} color={pctColor} sx={{ height: 8, borderRadius: 4 }} />
+            </Box>
+            <Stack direction="row" gap={4}>
+              {[
+                { label: "Avg / day", value: `$${fmt(dailyAvg)}`, alert: false },
+                { label: "Projected", value: `$${fmt(projected)}`, alert: willExceed },
+                { label: "Remaining", value: `$${fmt(Math.max(0, WEEKLY_BUDGET - weekSpend))}`, alert: false },
+              ].map(({ label, value, alert }) => (
+                <Box key={label} textAlign="right">
+                  <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                  <Typography fontSize={18} fontWeight={700} color={alert ? "error.main" : "text.primary"} lineHeight={1.3}>{value}</Typography>
+                </Box>
+              ))}
+            </Stack>
+            <Chip icon={willExceed ? <WarningAmberIcon fontSize="small" /> : <CheckCircleOutlineIcon fontSize="small" />}
+              label={willExceed ? "Over budget" : "On track"} color={willExceed ? "error" : "success"}
+              variant="outlined" sx={{ fontWeight: 600 }} />
+          </Paper>
+        );
+      })()}
+
+      {notConfigured && (
+        <Alert severity="info" sx={{ m: 2 }}>
+          LiteLLM is not configured. Set <code>LITELLM_BASE_URL</code> and <code>ANTHROPIC_API_KEY</code> to enable spend tracking.
+        </Alert>
+      )}
+      {error && <Alert severity="error" sx={{ m: 2 }}>{error}</Alert>}
+      {loading && <Box p={4} display="flex" justifyContent="center"><CircularProgress size={28} /></Box>}
+
+      {data && !loading && <LiteLLMContent
+        chartData={chartData} modelRows={modelRows} dailyResults={dailyResults} totalSpend={totalSpend}
+      />}
+    </>
+  );
+}
+
+type LiteLLMDailyRow = { date: string; metrics: { spend: number; prompt_tokens: number; completion_tokens: number; api_requests: number; total_tokens: number } };
+
+function LiteLLMContent({ chartData, modelRows, dailyResults, totalSpend }: {
+  chartData: { date: string; spend: number }[];
+  modelRows: [string, number][];
+  dailyResults: LiteLLMDailyRow[];
+  totalSpend: number;
+}) {
+  const [tab, setTab] = useState<"by_model" | "daily">("by_model");
+  const tabs = [{ key: "by_model" as const, label: "By Model" }, { key: "daily" as const, label: "Daily" }];
+
+  return (
+    <>
+      {/* Tab bar — same style as Agents Fleet */}
+      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", borderRadius: 0, px: 2, display: "flex", gap: 0 }}>
+        {tabs.map(({ key, label }) => (
+          <Button key={key} size="small" onClick={() => setTab(key)} disableRipple sx={{
+            borderRadius: 0, px: 2, py: 1.5,
+            fontWeight: tab === key ? 700 : 400,
+            color: tab === key ? "primary.main" : "text.secondary",
+            borderBottom: 2,
+            borderColor: tab === key ? "primary.main" : "transparent",
+            textTransform: "none", fontSize: 13,
+            "&:hover": { bgcolor: "action.hover" },
+          }}>{label}</Button>
+        ))}
+      </Paper>
+
+      {/* Content */}
+      <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+        <Paper variant="outlined" sx={{ minHeight: "100%", borderRadius: 2, overflow: "hidden" }}>
+
+          {tab === "by_model" && (
+            <Box p={2}>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Model</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>% of Total</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {modelRows.map(([model, spend]) => (
+                      <TableRow key={model} hover>
+                        <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{model || "—"}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: 12 }}>${fmt(spend, 4)}</TableCell>
+                        <TableCell align="right">
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, justifyContent: "flex-end" }}>
+                            <LinearProgress variant="determinate"
+                              value={totalSpend > 0 ? Math.min((spend / totalSpend) * 100, 100) : 0}
+                              sx={{ width: 60, height: 6, borderRadius: 3 }} />
+                            <Typography variant="caption" sx={{ minWidth: 28, textAlign: "right" }}>
+                              {totalSpend > 0 ? Math.round((spend / totalSpend) * 100) : 0}%
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+
+          {tab === "daily" && (
+            <>
+              {chartData.length > 0 && (
+                <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} barCategoryGap="20%">
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => {
+                        const d = new Date(v); return d.toLocaleDateString("en-US", { weekday: "short" });
+                      }} axisLine={false} tickLine={false} />
+                      <YAxis hide />
+                      <RechartsTooltip formatter={(v: number) => [`$${v.toFixed(2)}`, "Spend"]}
+                        labelFormatter={(l: string) => new Date(`${l}T00:00:00`).toLocaleDateString()} />
+                      <Bar dataKey="spend" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              )}
+              <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Requests</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Prompt Tokens</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>Completion Tokens</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600 }}>↓ Spend</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {[...dailyResults].sort((a, b) => b.date.localeCompare(a.date)).map((r) => (
+                    <TableRow key={r.date} hover>
+                      <TableCell sx={{ fontSize: 12 }}>{r.date}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.api_requests)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.prompt_tokens)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12 }}>{fmtTokens(r.metrics.completion_tokens)}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12, fontWeight: 600 }}>${fmt(r.metrics.spend, 4)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              </TableContainer>
+            </>
+          )}
+
+          {dailyResults.length === 0 && (
+            <Box p={3}><Typography color="text.secondary" fontSize={13}>No spend data found for this period.</Typography></Box>
+          )}
+        </Paper>
+      </Box>
+    </>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+
+type DashTab = "by_repo" | "by_command" | "by_model";
+
+
 export function DashboardContent() {
-  const [mainTab, setMainTab] = useState<"agents_fleet" | "litellm" | "headroom">("agents_fleet");
+  const [mainTab, setMainTab] = useState<"agents_fleet" | "litellm" | "headroom" | "caveman">("agents_fleet");
   const [tab, setTab] = useState<DashTab>("by_repo");
   const [preset, setPreset] = useState<Preset>("this_week");
   const [customFrom, setCustomFrom] = useState(() => toDateStr(new Date()));
@@ -1558,6 +1574,7 @@ export function DashboardContent() {
   const [commands, setCommands] = useState<DashboardCommandStat[]>([]);
   const [models, setModels] = useState<DashboardModelStat[]>([]);
   const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
+  const [cavemanStats, setCavemanStats] = useState<CavemanStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1571,6 +1588,7 @@ export function DashboardContent() {
       getDashboardByCommand(from, to).then((c) => setCommands(c.commands)),
       getDashboardByModel(from, to).then((m) => setModels(m.models)),
       getDashboardAlerts(from, to).then((a) => setAlerts(a)),
+      getCavemanStats().then((c) => setCavemanStats(c)),
     ])
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -1593,7 +1611,7 @@ export function DashboardContent() {
     >
       {/* Main tab: Agents Fleet / LiteLLM / Headroom */}
       <Box sx={{ display: "flex", gap: 0, borderBottom: 1, borderColor: "divider", px: 2 }}>
-        {(["agents_fleet", "litellm", "headroom"] as const).map((key) => (
+        {(["agents_fleet", "litellm", "headroom", "caveman"] as const).map((key) => (
           <Button
             key={key}
             size="small"
@@ -1610,10 +1628,69 @@ export function DashboardContent() {
               fontSize: 13,
             }}
           >
-            {key === "agents_fleet" ? "Agents Fleet" : key === "litellm" ? "LiteLLM" : "Headroom"}
+            {key === "agents_fleet" ? "Agents Fleet" : key === "litellm" ? "LiteLLM" : key === "headroom" ? "Headroom" : "Caveman"}
           </Button>
         ))}
       </Box>
+
+      {mainTab === "caveman" && (
+        <Box sx={{ p: 2 }}>
+          {!cavemanStats || cavemanStats.totals.session_count === 0 ? (
+            <Typography color="text.secondary" sx={{ fontSize: 13, mt: 2 }}>
+              No caveman sessions yet. Select a compression level in Headroom Shell to start tracking.
+            </Typography>
+          ) : (
+            <>
+              {/* Summary strip */}
+              <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap" }}>
+                {[
+                  { label: "Sessions", value: cavemanStats.totals.session_count },
+                  { label: "Output tokens (measured)", value: cavemanStats.totals.total_output_tokens.toLocaleString() },
+                  { label: "Est. tokens saved", value: `~${cavemanStats.totals.tokens_saved_estimate.toLocaleString()}` },
+                  { label: "Cost (compressed)", value: `$${cavemanStats.totals.total_cost.toFixed(4)}` },
+                ].map(({ label, value }) => (
+                  <Paper key={label} variant="outlined" sx={{ p: 2, minWidth: 160, flex: 1 }}>
+                    <Typography sx={{ fontSize: 11, color: "text.secondary", mb: 0.5 }}>{label}</Typography>
+                    <Typography sx={{ fontSize: 20, fontWeight: 700 }}>{value}</Typography>
+                  </Paper>
+                ))}
+              </Box>
+
+              {/* Per-level breakdown */}
+              <Typography sx={{ fontSize: 13, fontWeight: 600, mb: 1 }}>By compression level</Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {cavemanStats.by_level.map((row) => (
+                  <Paper key={row.level} variant="outlined" sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 2 }}>
+                    <Chip label={row.level} size="small" sx={{ textTransform: "capitalize", width: 70, fontWeight: 600 }} />
+                    <Box sx={{ flex: 1, display: "flex", gap: 3, flexWrap: "wrap" }}>
+                      <Box>
+                        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>Sessions</Typography>
+                        <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{row.session_count}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>Output tokens</Typography>
+                        <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{row.total_output_tokens.toLocaleString()}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>Est. tokens saved</Typography>
+                        <Typography sx={{ fontSize: 14, fontWeight: 600, color: "success.main" }}>~{row.tokens_saved_estimate.toLocaleString()}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>Reduction rate</Typography>
+                        <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{Math.round(row.savings_rate * 100)}%</Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                ))}
+              </Box>
+
+              <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 2 }}>
+                * Token savings are estimates based on published caveman compression rates per level. Actual savings may vary.
+              </Typography>
+            </>
+          )}
+        </Box>
+      )}
 
       {mainTab === "litellm" && (
         <Box sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>

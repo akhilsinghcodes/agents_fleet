@@ -1,13 +1,18 @@
 import type {
-    CreateSessionRequest,
-    Session,
-    SessionArtifact,
+  CreateSessionRequest,
+  Session,
+  SessionArtifact,
 } from "@agents_fleet/shared";
 import type { Request, Response, Router } from "express";
 import { Router as createRouter } from "express";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { getDb } from "../db";
+import {
+  buildGitArtifactContent,
+  captureGitSnapshot,
+  storeSessionArtifact,
+} from "../gitArtifacts";
 import type { ProcessManager } from "../processManager";
 
 function nowIso() {
@@ -52,6 +57,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const budgetUsd = body?.budgetUsd;
     const budgetTokens = body?.budgetTokens;
     const headroom = body?.headroom === true;
+    const cavemanLevel = body?.cavemanLevel ?? null;
     if (typeof repoPath !== "string" || repoPath.trim().length === 0) {
       return jsonError(res, 400, "repoPath is required");
     }
@@ -80,7 +86,9 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const id = crypto.randomUUID();
     const createdAt = nowIso();
     const status: Session["status"] = "running";
-    const storedCommand = headroom ? `[headroom-shell]:${command.trim()}` : command.trim();
+    const storedCommand = headroom
+      ? `[headroom-shell]:${command.trim()}`
+      : command.trim();
 
     const db = getDb();
     db.prepare(
@@ -89,14 +97,14 @@ export function sessionsRouter(processManager: ProcessManager): Router {
         pid, exit_code, ended_at,
         budget_usd, budget_tokens,
         estimated_input_tokens, estimated_output_tokens, estimated_cost_usd,
-        budget_exceeded_at, stop_reason
+        budget_exceeded_at, stop_reason, caveman_level
       )
       VALUES (
         ?, ?, ?, ?, ?,
         NULL, NULL, NULL,
         ?, ?,
         0, 0, 0,
-        NULL, NULL
+        NULL, NULL, ?
       )`,
     ).run(
       id,
@@ -106,11 +114,18 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       repoPath,
       budgetUsd ?? null,
       budgetTokens ?? null,
+      cavemanLevel ?? null,
     );
 
     // Spawn after session row exists so logs can be appended.
     try {
-      processManager.spawnSession({ sessionId: id, repoPath, command: command.trim(), headroom });
+      processManager.spawnSession({
+        sessionId: id,
+        repoPath,
+        command: command.trim(),
+        headroom,
+        cavemanLevel,
+      });
     } catch (e) {
       db.prepare(
         "UPDATE sessions SET status = ?, ended_at = ?, stop_reason = ? WHERE id = ?",
@@ -153,6 +168,30 @@ export function sessionsRouter(processManager: ProcessManager): Router {
 
     if (existing.status !== "running") return res.json({ session: existing });
 
+    const chatCommands = ["[claude-sdk]", "[litellm-chat]", "[headroom-chat]"];
+    if (chatCommands.includes(existing.command)) {
+      const now = new Date().toISOString();
+      db.prepare(
+        `UPDATE sessions SET status = 'stopped', ended_at = ?, stop_reason = 'user_stop' WHERE id = ?`,
+      ).run(now, id);
+      try {
+        const snap = captureGitSnapshot(existing.repo_path);
+        storeSessionArtifact({
+          sessionId: id,
+          kind: "git_on_stop",
+          content: buildGitArtifactContent(snap),
+        });
+      } catch {
+        /* ignore */
+      }
+      const updated = db
+        .prepare(
+          `SELECT id, created_at, status, command, repo_path, pid, exit_code, ended_at, budget_usd, budget_tokens, estimated_input_tokens, estimated_output_tokens, estimated_cost_usd, budget_exceeded_at, stop_reason FROM sessions WHERE id = ?`,
+        )
+        .get(id) as Session;
+      return res.json({ session: updated });
+    }
+
     const updated = await processManager.stopSession(id, "user_stop");
     if (!updated) return jsonError(res, 404, "Session not found");
     return res.json({ session: updated });
@@ -179,10 +218,16 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       )
       .all() as (Session & { summary_content?: string })[];
 
+    // Extract title from summary_content and attach it
     const sessionsWithTitle = sessions.map(({ summary_content, ...s }) => {
       let session_title: string | null = null;
       if (summary_content) {
-        try { session_title = (JSON.parse(summary_content) as { title?: string }).title ?? null; } catch { /* noop */ }
+        try {
+          session_title =
+            (JSON.parse(summary_content) as { title?: string }).title ?? null;
+        } catch {
+          // ignore malformed summary content
+        }
       }
       return { ...s, session_title };
     });
@@ -242,6 +287,7 @@ export function sessionsRouter(processManager: ProcessManager): Router {
       data: string;
     }>;
 
+    res.setHeader("Cache-Control", "no-store");
     res.json({ chunks, limit, offset });
   });
 
@@ -273,8 +319,6 @@ export function sessionsRouter(processManager: ProcessManager): Router {
 
     res.json({ markers });
   });
-
-
 
   /**
    * GET /api/sessions/:id/artifacts?limit=...&offset=...&kind=...&latest=1
@@ -331,15 +375,31 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     const id = req.params.id;
     const db = getDb();
     const session = db
-      .prepare("SELECT id, repo_path, command, estimated_input_tokens, estimated_output_tokens, estimated_cost_usd FROM sessions WHERE id = ? LIMIT 1")
-      .get(id) as { id: string; repo_path: string; command: string; estimated_input_tokens: number | null; estimated_output_tokens: number | null; estimated_cost_usd: number | null } | undefined;
+      .prepare(
+        "SELECT id, repo_path, command, estimated_input_tokens, estimated_output_tokens, estimated_cost_usd FROM sessions WHERE id = ? LIMIT 1",
+      )
+      .get(id) as
+      | {
+          id: string;
+          repo_path: string;
+          command: string;
+          estimated_input_tokens: number | null;
+          estimated_output_tokens: number | null;
+          estimated_cost_usd: number | null;
+        }
+      | undefined;
     if (!session) return jsonError(res, 404, "Session not found");
 
     const baseUrl = process.env.LITELLM_BASE_URL?.replace(/\/$/, "");
     const apiKey = process.env.LITELLM_API_KEY;
     if (!baseUrl || !apiKey)
-      return jsonError(res, 503, "LITELLM_BASE_URL and LITELLM_API_KEY are required");
+      return jsonError(
+        res,
+        503,
+        "LITELLM_BASE_URL and ANTHROPIC_API_KEY are required",
+      );
 
+    // Fetch git diff from latest git artifact
     const artifact = db
       .prepare(
         `SELECT content FROM session_artifacts
@@ -351,23 +411,35 @@ export function sessionsRouter(processManager: ProcessManager): Router {
     let diffText = "";
     if (artifact) {
       try {
-        const parsed = JSON.parse(artifact.content) as { diff?: string; changedFiles?: string[] };
-        if (parsed.diff) diffText = parsed.diff.slice(0, 3000);
-      } catch { /* noop */ }
+        const parsed = JSON.parse(artifact.content) as {
+          diff?: string;
+          changedFiles?: string[];
+        };
+        if (parsed.diff) diffText = parsed.diff.slice(0, 3000); // cap to keep prompt small for reasoning model
+      } catch {
+        // ignore malformed diff artifact
+      }
     }
 
+    // Fetch stdin events — strip ANSI escape sequences, mouse events, and control chars
     const stdinRows = db
-      .prepare(`SELECT data FROM stdin_events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 200`)
+      .prepare(
+        `SELECT data FROM stdin_events WHERE session_id = ? ORDER BY timestamp ASC LIMIT 200`,
+      )
       .all(id) as { data: string }[];
     const stdinText = stdinRows
       .map((r) => r.data)
       .join("")
-      /* eslint-disable no-control-regex */
+      // Strip ANSI/VT escape sequences (ESC [ ... and ESC < ... mouse events)
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, "")
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b<[^M]*M/g, "")
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b[^[]/g, "")
+      // Strip remaining non-printable control chars except newline/tab
+      // eslint-disable-next-line no-control-regex
       .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
-      /* eslint-enable no-control-regex */
       .trim()
       .slice(0, 2000);
 
@@ -388,9 +460,12 @@ Respond with JSON only, no markdown:
     try {
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: "gpt-4.1-nano",
           messages: [{ role: "user", content: prompt }],
           temperature: 0.3,
           max_tokens: 300,
@@ -402,24 +477,45 @@ Respond with JSON only, no markdown:
         return jsonError(res, 502, `LiteLLM error: ${err.slice(0, 200)}`);
       }
 
-      const data = await response.json() as { choices: { message: { content: string } }[]; usage?: Record<string, unknown> };
+      const data = (await response.json()) as {
+        choices: { message: { content: string } }[];
+        usage?: Record<string, unknown>;
+      };
       const content = data.choices[0]?.message?.content ?? "";
-      if (!content) return jsonError(res, 502, "Model returned empty response — please try again");
+      if (!content)
+        return jsonError(
+          res,
+          502,
+          "Model returned empty response — please try again",
+        );
 
       const summaryInputTokens = (data.usage?.prompt_tokens as number) ?? 0;
-      const summaryOutputTokens = (data.usage?.completion_tokens as number) ?? 0;
-      const summaryTotalCost = (summaryInputTokens * 0.15 + summaryOutputTokens * 0.60) / 1_000_000;
+      const summaryOutputTokens =
+        (data.usage?.completion_tokens as number) ?? 0;
+      const summaryTotalCost =
+        (summaryInputTokens * 0.15 + summaryOutputTokens * 0.6) / 1_000_000;
 
       let parsed: { title: string; summary: string };
       try {
-        const cleaned = content.replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+        // Strip markdown code fences if model wraps response in ```json ... ```
+        const cleaned = content
+          .replace(/^```[a-z]*\n?/i, "")
+          .replace(/```\s*$/, "")
+          .trim();
         parsed = JSON.parse(cleaned) as { title: string; summary: string };
       } catch {
-        return jsonError(res, 502, `Model returned invalid JSON: ${content.slice(0, 200)}`);
+        return jsonError(
+          res,
+          502,
+          `Model returned invalid JSON: ${content.slice(0, 200)}`,
+        );
       }
 
+      // Upsert into session_artifacts so it persists across refreshes
       const existingArtifact = db
-        .prepare("SELECT id FROM session_artifacts WHERE session_id = ? AND kind = 'session_summary' LIMIT 1")
+        .prepare(
+          "SELECT id FROM session_artifacts WHERE session_id = ? AND kind = 'session_summary' LIMIT 1",
+        )
         .get(id) as { id: string } | undefined;
 
       const summaryContent = JSON.stringify({
@@ -430,11 +526,19 @@ Respond with JSON only, no markdown:
         cost_usd: summaryTotalCost,
       });
       if (existingArtifact) {
-        db.prepare("UPDATE session_artifacts SET content = ?, timestamp = ? WHERE id = ?")
-          .run(summaryContent, nowIso(), existingArtifact.id);
+        db.prepare(
+          "UPDATE session_artifacts SET content = ?, timestamp = ? WHERE id = ?",
+        ).run(summaryContent, nowIso(), existingArtifact.id);
       } else {
-        db.prepare("INSERT INTO session_artifacts (id, session_id, timestamp, kind, content) VALUES (?,?,?,?,?)")
-          .run(crypto.randomUUID(), id, nowIso(), "session_summary", summaryContent);
+        db.prepare(
+          "INSERT INTO session_artifacts (id, session_id, timestamp, kind, content) VALUES (?,?,?,?,?)",
+        ).run(
+          crypto.randomUUID(),
+          id,
+          nowIso(),
+          "session_summary",
+          summaryContent,
+        );
       }
 
       return res.json({

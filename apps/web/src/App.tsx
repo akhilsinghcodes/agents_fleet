@@ -25,7 +25,9 @@ import {
     CssBaseline,
     Divider,
     IconButton,
+    MenuItem,
     Paper,
+    Select,
     Stack,
     TextField,
     ThemeProvider,
@@ -56,7 +58,6 @@ function StatusBadge({ status }: { status: string }) {
     />
   );
 }
-
 
 // ── Command type badge ────────────────────────────────────────────────────────
 
@@ -208,7 +209,7 @@ function SessionsSidebar({
                     </Typography>
                   </Box>
                   <Typography fontWeight={600} fontSize={13} mb={0.25} noWrap>
-                    {s.command.startsWith("[headroom-shell]:") || s.command.startsWith("[headroom-shell]:") ? s.command.split(":").slice(1).join(":") : s.command}
+                    {s.command}
                   </Typography>
                   {s.session_title && (
                     <Typography fontSize={11} fontWeight={500} color="text.primary" noWrap mb={0.25}>
@@ -265,6 +266,7 @@ function MainApp() {
   const [command, setCommand] = useState("");
   const [budgetUsd, setBudgetUsd] = useState("");
   const [budgetTokens, setBudgetTokens] = useState("");
+  const [cavemanLevel, setCavemanLevel] = useState<"" | "lite" | "full" | "ultra" | "wenyan">("");
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
   const toastCounter = useRef(0);
@@ -281,6 +283,7 @@ function MainApp() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const [ctxPctMap, setCtxPctMap] = useState<Record<string, number>>({});
 
   const selected = useMemo(
     () => sessions.find((s) => s.id === selectedId) ?? null,
@@ -355,7 +358,7 @@ function MainApp() {
   }, [selectedId]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
-  async function onCreate(e: React.FormEvent) {
+  async function onCreate(e: React.FormEvent, headroom = false) {
     e.preventDefault();
     setError(null);
     try {
@@ -364,6 +367,8 @@ function MainApp() {
         command,
         budgetUsd: budgetUsd.trim() ? Number(budgetUsd) : undefined,
         budgetTokens: budgetTokens.trim() ? Number(budgetTokens) : undefined,
+        headroom: headroom || undefined,
+        cavemanLevel: headroom && cavemanLevel ? cavemanLevel : null,
       });
       setRepoPath(""); setCommand(""); setBudgetUsd(""); setBudgetTokens("");
       await refreshSessions(false);
@@ -417,6 +422,28 @@ function MainApp() {
     analytics: "Analytics",
   };
 
+  const showsAnalyticsTab = leftTab === "shell" || leftTab === "headroom_shell";
+  const [chatTab, setChatTab] = useState<"chat" | "artifacts" | "analytics">("chat");
+  // Reset to chat view when selecting a different session
+  const prevSelectedId = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedId !== prevSelectedId.current) {
+      prevSelectedId.current = selectedId;
+      setChatTab("chat");
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ sessionId: string; ctxPct: number | null }>;
+      const ctxPct = ce.detail?.ctxPct;
+      if (ctxPct == null) return;
+      setCtxPctMap((prev) => ({ ...prev, [ce.detail.sessionId]: ctxPct }));
+    };
+    window.addEventListener("agents_fleet:ctx_pct", handler as EventListener);
+    return () => window.removeEventListener("agents_fleet:ctx_pct", handler as EventListener);
+  }, []);
+
   return (
     <Box
       sx={{
@@ -459,7 +486,7 @@ function MainApp() {
             letterSpacing={1.5}
             sx={{ mr: 1, whiteSpace: "nowrap", color: "#ffffff", fontFamily: "ui-monospace, monospace" }}
           >
-            AGENT FLEET
+            AI WATCH TOWER
           </Typography>
           <Chip
             label="beta"
@@ -474,7 +501,7 @@ function MainApp() {
             {leftTabs.map(({ key, label }) => (
               <Button
                 key={key}
-                onClick={() => setLeftTab(key)}
+                onClick={() => { setLeftTab(key as LeftTab); if (centerTab === "analytics" && key !== "shell" && key !== "headroom_shell") setCenterTab("terminal"); }}
                 sx={{
                   textTransform: "none",
                   fontWeight: leftTab === key ? 700 : 400,
@@ -521,92 +548,99 @@ function MainApp() {
         {/* Content area */}
         <Box sx={{ minHeight: 0, overflow: "hidden", display: "grid" }}>
           {leftTab === "claude_sdk" ? (
-            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
-              {selected && selected.command === "[claude-sdk]" ? (
-                <ClaudeSdkChat mode="existing" sessionId={selected.id} />
-              ) : (
-                <ClaudeSdkChat
-                  key={`claude-new-${claudeDraftNonce}`}
-                  mode="new"
-                  onCreated={(session) => {
-                    setError(null);
-                    refreshSessions(false).catch(() => undefined);
-                    setSelectedId(session.id);
-                    setCenterTab("artifacts");
-                  }}
-                />
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, height: "100%" }}>
+              {selected && selected.command === "[claude-sdk]" && (
+                <Box sx={{ display: "flex", gap: 0.25, px: 2, pt: 0.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+                  {(["chat", "artifacts", "analytics"] as const).map((t) => (
+                    <Button key={t} size="small" onClick={() => setChatTab(t)} sx={{ textTransform: "none", fontSize: 13, fontWeight: chatTab === t ? 700 : 400, borderBottom: chatTab === t ? 2 : 0, borderColor: "primary.main", borderRadius: 0, pb: 0.5 }}>
+                      {t === "chat" ? "Chat" : t === "artifacts" ? "Artifacts" : "Analytics"}
+                    </Button>
+                  ))}
+                </Box>
               )}
+              <Box sx={{ minHeight: 0, overflow: "hidden", height: "100%" }}>
+                {(!selected || selected.command !== "[claude-sdk]" || chatTab === "chat") && (
+                  <Box sx={{ p: 2.5, overflow: "auto", height: "100%" }}>
+                    {selected && selected.command === "[claude-sdk]" ? (
+                      <ClaudeSdkChat mode="existing" sessionId={selected.id} />
+                    ) : (
+                      <ClaudeSdkChat key={`claude-new-${claudeDraftNonce}`} mode="new" onCreated={(session) => { setError(null); refreshSessions(false).catch(() => undefined); setSelectedId(session.id); setChatTab("chat"); }} />
+                    )}
+                  </Box>
+                )}
+                {selected && selected.command === "[claude-sdk]" && chatTab === "artifacts" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><SessionArtifacts sessionId={selected.id} /></Box>
+                )}
+                {selected && selected.command === "[claude-sdk]" && chatTab === "analytics" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><AnalyticsContent sessionId={selected.id} /></Box>
+                )}
+              </Box>
             </Box>
           ) : leftTab === "litellm" ? (
-            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
-              {selected && selected.command === "[litellm-chat]" ? (
-                <LiteLLMChat mode="existing" sessionId={selected.id} />
-              ) : (
-                <LiteLLMChat
-                  key={`litellm-new-${liteLlmDraftNonce}`}
-                  mode="new"
-                  onCreated={(session) => {
-                    setError(null);
-                    refreshSessions(false).catch(() => undefined);
-                    setSelectedId(session.id);
-                    setCenterTab("artifacts");
-                  }}
-                />
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, height: "100%" }}>
+              {selected && selected.command === "[litellm-chat]" && (
+                <Box sx={{ display: "flex", gap: 0.25, px: 2, pt: 0.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+                  {(["chat", "artifacts", "analytics"] as const).map((t) => (
+                    <Button key={t} size="small" onClick={() => setChatTab(t)} sx={{ textTransform: "none", fontSize: 13, fontWeight: chatTab === t ? 700 : 400, borderBottom: chatTab === t ? 2 : 0, borderColor: "primary.main", borderRadius: 0, pb: 0.5 }}>
+                      {t === "chat" ? "Chat" : t === "artifacts" ? "Artifacts" : "Analytics"}
+                    </Button>
+                  ))}
+                </Box>
               )}
+              <Box sx={{ minHeight: 0, overflow: "hidden", height: "100%" }}>
+                {(!selected || selected.command !== "[litellm-chat]" || chatTab === "chat") && (
+                  <Box sx={{ p: 2.5, overflow: "auto", height: "100%" }}>
+                    {selected && selected.command === "[litellm-chat]" ? (
+                      <LiteLLMChat mode="existing" sessionId={selected.id} />
+                    ) : (
+                      <LiteLLMChat key={`litellm-new-${liteLlmDraftNonce}`} mode="new" onCreated={(session) => { setError(null); refreshSessions(false).catch(() => undefined); setSelectedId(session.id); setChatTab("chat"); }} />
+                    )}
+                  </Box>
+                )}
+                {selected && selected.command === "[litellm-chat]" && chatTab === "artifacts" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><SessionArtifacts sessionId={selected.id} /></Box>
+                )}
+                {selected && selected.command === "[litellm-chat]" && chatTab === "analytics" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><AnalyticsContent sessionId={selected.id} /></Box>
+                )}
+              </Box>
             </Box>
           ) : leftTab === "headroom_chat" ? (
-            <Box sx={{ p: 2.5, overflow: "auto", minHeight: 0, display: "grid", gridTemplateRows: "1fr" }}>
-              {selected && selected.command === "[headroom-chat]" ? (
-                <HeadroomChat mode="existing" sessionId={selected.id} />
-              ) : (
-                <HeadroomChat
-                  key={`headroom-new-${headroomDraftNonce}`}
-                  mode="new"
-                  onCreated={(session) => {
-                    setError(null);
-                    refreshSessions(false).catch(() => undefined);
-                    setSelectedId(session.id);
-                    setCenterTab("artifacts");
-                  }}
-                />
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, height: "100%" }}>
+              {selected && selected.command === "[headroom-chat]" && (
+                <Box sx={{ display: "flex", gap: 0.25, px: 2, pt: 0.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+                  {(["chat", "artifacts", "analytics"] as const).map((t) => (
+                    <Button key={t} size="small" onClick={() => setChatTab(t)} sx={{ textTransform: "none", fontSize: 13, fontWeight: chatTab === t ? 700 : 400, borderBottom: chatTab === t ? 2 : 0, borderColor: "primary.main", borderRadius: 0, pb: 0.5 }}>
+                      {t === "chat" ? "Chat" : t === "artifacts" ? "Artifacts" : "Analytics"}
+                    </Button>
+                  ))}
+                </Box>
               )}
+              <Box sx={{ minHeight: 0, overflow: "hidden", height: "100%" }}>
+                {(!selected || selected.command !== "[headroom-chat]" || chatTab === "chat") && (
+                  <Box sx={{ p: 2.5, overflow: "auto", height: "100%" }}>
+                    {selected && selected.command === "[headroom-chat]" ? (
+                      <HeadroomChat mode="existing" sessionId={selected.id} />
+                    ) : (
+                      <HeadroomChat key={`headroom-new-${headroomDraftNonce}`} mode="new" onCreated={(session) => { setError(null); refreshSessions(false).catch(() => undefined); setSelectedId(session.id); setChatTab("chat"); }} />
+                    )}
+                  </Box>
+                )}
+                {selected && selected.command === "[headroom-chat]" && chatTab === "artifacts" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><SessionArtifacts sessionId={selected.id} /></Box>
+                )}
+                {selected && selected.command === "[headroom-chat]" && chatTab === "analytics" && (
+                  <Box sx={{ height: "100%", overflow: "auto" }}><AnalyticsContent sessionId={selected.id} /></Box>
+                )}
+              </Box>
             </Box>
-          ) : leftTab === "ai_coach" ? (
-            <AiCoachAnalyticsContent />
           ) : leftTab === "headroom_shell" ? (
             /* Headroom Shell tab - identical to Shell tab but with headroom: true */
-            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
-              {/* Headroom Shell creation form */}
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, height: "100%" }}>
               <Box
                 component="form"
-                onSubmit={(e: React.FormEvent) => {
-                  e.preventDefault();
-                  setError(null);
-                  try {
-                    createSession({
-                      repoPath: repoPath.trim(),
-                      command,
-                      budgetUsd: budgetUsd.trim() ? Number(budgetUsd) : undefined,
-                      budgetTokens: budgetTokens.trim() ? Number(budgetTokens) : undefined,
-                      headroom: true,
-                    })
-                      .then((session) => {
-                        setRepoPath(""); setCommand(""); setBudgetUsd(""); setBudgetTokens("");
-                        return refreshSessions(false).then(() => {
-                          setSelectedId(session.id);
-                          setCenterTab("terminal");
-                        });
-                      })
-                      .catch((err) => setError(String(err)));
-                  } catch (err) { setError(String(err)); }
-                }}
-                sx={{
-                  px: 2.5,
-                  py: 1.5,
-                  borderBottom: 1,
-                  borderColor: "divider",
-                  bgcolor: "background.default",
-                }}
+                onSubmit={(e) => onCreate(e, true)}
+                sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}
               >
                 <Stack direction="row" gap={1} alignItems="flex-end">
                   <TextField
@@ -649,47 +683,31 @@ function MainApp() {
                     inputProps={{ inputMode: "numeric", style: { fontSize: 13 } }}
                     InputLabelProps={{ style: { fontSize: 13 } }}
                   />
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    disableElevation
-                    sx={{ textTransform: "none", fontWeight: 600, whiteSpace: "nowrap" }}
+                  <Select
+                    value={cavemanLevel}
+                    onChange={(e) => setCavemanLevel(e.target.value as typeof cavemanLevel)}
+                    displayEmpty
+                    size="small"
+                    sx={{ width: 130, fontSize: 13 }}
+                    renderValue={(v) => v ? `Caveman: ${v}` : "Caveman: off"}
                   >
+                    <MenuItem value="" sx={{ fontSize: 13 }}>Off</MenuItem>
+                    <MenuItem value="lite" sx={{ fontSize: 13 }}>Lite</MenuItem>
+                    <MenuItem value="full" sx={{ fontSize: 13 }}>Full</MenuItem>
+                    <MenuItem value="ultra" sx={{ fontSize: 13 }}>Ultra</MenuItem>
+                    <MenuItem value="wenyan" sx={{ fontSize: 13 }}>Wenyan</MenuItem>
+                  </Select>
+                  <Button type="submit" variant="contained" disableElevation sx={{ textTransform: "none", fontWeight: 600, whiteSpace: "nowrap" }}>
                     Start
                   </Button>
                 </Stack>
-                {error && (
-                  <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: 12 }}>
-                    {error}
-                  </Alert>
-                )}
+                {error && <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: 12 }}>{error}</Alert>}
               </Box>
-
-              {/* Session header + terminal area */}
-              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0 }}>
-                {/* Selected session info bar */}
+              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0, height: "100%" }}>
                 {selected && (
-                  <Box
-                    sx={{
-                      px: 2.5,
-                      py: 0.875,
-                      borderBottom: 1,
-                      borderColor: "divider",
-                      bgcolor: "background.default",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 1.5,
-                      minWidth: 0,
-                    }}
-                  >
+                  <Box sx={{ px: 2.5, py: 0.875, borderBottom: 1, borderColor: "divider", bgcolor: "background.default", display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
                     <StatusBadge status={selected.status} />
-                    <Typography
-                      fontSize={13}
-                      fontWeight={500}
-                      fontFamily="ui-monospace, monospace"
-                      sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                      title={selected.repo_path}
-                    >
+                    <Typography fontSize={13} fontWeight={500} fontFamily="ui-monospace, monospace" sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={selected.repo_path}>
                       {selected.repo_path}
                     </Typography>
                     <Divider orientation="vertical" flexItem />
@@ -702,114 +720,42 @@ function MainApp() {
                     <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
                       cost <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)}</Box>
                     </Typography>
-                    {(selected.budget_tokens || selected.budget_usd) && (
-                      <>
-                        <Divider orientation="vertical" flexItem />
-                        {selected.budget_tokens && (
-                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
-                            total <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>{(selected.estimated_input_tokens + selected.estimated_output_tokens).toLocaleString()} / {selected.budget_tokens.toLocaleString()}</Box>
-                          </Typography>
-                        )}
-                        {selected.budget_usd && (
-                          <Typography fontSize={12} color="text.secondary" sx={{ flexShrink: 0 }}>
-                            budget <Box component="span" fontWeight={700} sx={{ color: "text.primary" }}>${selected.estimated_cost_usd.toFixed(4)} / ${selected.budget_usd.toFixed(2)}</Box>
-                          </Typography>
-                        )}
-                      </>
-                    )}
-                    {selected.stop_reason && (
-                      <>
-                        <Divider orientation="vertical" flexItem />
-                        <Typography fontSize={12} fontWeight={500} sx={{ color: "#b45309", flexShrink: 0 }}>
-                          {selected.stop_reason}
-                        </Typography>
-                      </>
-                    )}
                     <Divider orientation="vertical" flexItem />
-                    <Typography
-                      fontSize={11}
-                      fontFamily="ui-monospace, monospace"
-                      sx={{ bgcolor: "#f1f5f9", color: "#475569", px: 0.75, py: 0.25, borderRadius: 1, flexShrink: 0 }}
-                    >
+                    {selectedId && ctxPctMap[selectedId] != null && (
+                      <Chip
+                        label={`${ctxPctMap[selectedId]}% context`}
+                        size="small"
+                        sx={{
+                          fontSize: 11,
+                          fontFamily: "ui-monospace, monospace",
+                          height: 24,
+                          bgcolor: ctxPctMap[selectedId] >= 90 ? "#dc2626" : ctxPctMap[selectedId] >= 70 ? "#b45309" : "#15803d",
+                          color: "white",
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <Typography fontSize={11} fontFamily="ui-monospace, monospace" sx={{ bgcolor: "#f1f5f9", color: "#475569", px: 0.75, py: 0.25, borderRadius: 1, flexShrink: 0 }}>
                       {selected.id.slice(0, 8)}
                     </Typography>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      color="error"
-                      startIcon={<StopCircleOutlinedIcon sx={{ fontSize: "14px !important" }} />}
-                      onClick={onStop}
-                      disabled={selected.status !== "running"}
-                      sx={{ textTransform: "none", fontSize: 12, py: 0.25, flexShrink: 0 }}
-                    >
+                    <Button size="small" variant="outlined" color="error" startIcon={<StopCircleOutlinedIcon sx={{ fontSize: "14px !important" }} />} onClick={onStop} disabled={selected.status !== "running"} sx={{ textTransform: "none", fontSize: 12, py: 0.25, flexShrink: 0 }}>
                       Stop
                     </Button>
                   </Box>
                 )}
-
-                {/* Center tab bar */}
-                <Box
-                  sx={{
-                    display: "flex",
-                    gap: 0.25,
-                    px: 2,
-                    py: 0.75,
-                    borderBottom: 1,
-                    borderColor: "divider",
-                    bgcolor: "background.default",
-                  }}
-                >
-                  {(["terminal", "logs", "artifacts", "analytics"] as CenterTab[]).map((tab) => (
-                    <Button
-                      key={tab}
-                      size="small"
-                      onClick={() => setCenterTab(tab)}
-                      disabled={!selectedId}
-                      sx={{
-                        textTransform: "none",
-                        fontSize: 12,
-                        fontWeight: centerTab === tab ? 700 : 400,
-                        bgcolor: "transparent",
-                        color: centerTab === tab ? "#0891b2" : "text.secondary",
-                        borderRadius: 0,
-                        px: 1.5,
-                        py: 0.75,
-                        borderBottom: centerTab === tab ? "2px solid" : "2px solid transparent",
-                        borderColor: centerTab === tab ? "#0891b2" : "transparent",
-                        "&:hover": { bgcolor: "action.hover", color: "text.primary" },
-                        "&.Mui-disabled": { color: "text.disabled" },
-                      }}
-                    >
+                <Box sx={{ display: "flex", gap: 0.25, px: 2, py: 0.75, borderBottom: 1, borderColor: "divider", bgcolor: "background.default" }}>
+                  {(["terminal", "logs", "artifacts", ...(showsAnalyticsTab ? ["analytics"] : [])] as CenterTab[]).map((tab) => (
+                    <Button key={tab} size="small" onClick={() => setCenterTab(tab)} disabled={!selectedId} sx={{ textTransform: "none", fontSize: 12, fontWeight: centerTab === tab ? 700 : 400, bgcolor: "transparent", color: centerTab === tab ? "#0891b2" : "text.secondary", borderRadius: 0, px: 1.5, py: 0.75, borderBottom: centerTab === tab ? "2px solid" : "2px solid transparent", borderColor: centerTab === tab ? "#0891b2" : "transparent", "&:hover": { bgcolor: "action.hover", color: "text.primary" }, "&.Mui-disabled": { color: "text.disabled" } }}>
                       {centerTabLabels[tab]}
                     </Button>
                   ))}
                 </Box>
-
-                {/* Terminal / logs / artifacts / analytics */}
-                <Box sx={{ minHeight: 0, overflow: "hidden" }}>
-                  {selectedId && centerTab === "terminal" && (
-                    <TerminalPane sessionId={selectedId} ws={ws} active />
-                  )}
-                  {selectedId && centerTab === "logs" && (
-                    <TerminalReplay
-                      sessionId={selectedId}
-                      active
-                      freezeAtExit={selected?.command.trim().startsWith("claude")}
-                    />
-                  )}
+                <Box sx={{ minHeight: 0, overflow: "hidden", height: "100%" }}>
+                  {selectedId && centerTab === "terminal" && <TerminalPane sessionId={selectedId} ws={ws} active />}
+                  {selectedId && centerTab === "logs" && <TerminalReplay sessionId={selectedId} active freezeAtExit={!!selected?.command.trim().match(/(?:^|\]:)claude/)} />}
                   {selectedId && centerTab === "artifacts" && (
                     <Box sx={{ height: "100%", overflow: "auto", p: 2, boxSizing: "border-box" }}>
-                      <SessionArtifacts
-                        sessionId={selectedId}
-                        onResume={(newSessionId) => {
-                          if (newSessionId === "__pre_launch__") {
-                            setCenterTab("terminal");
-                            return;
-                          }
-                          void refreshSessions(false);
-                          setSelectedId(newSessionId);
-                        }}
-                      />
+                      <SessionArtifacts sessionId={selectedId} onResume={(newSessionId) => { if (newSessionId === "__pre_launch__") { setCenterTab("terminal"); return; } void refreshSessions(false); setSelectedId(newSessionId); }} />
                     </Box>
                   )}
                   {selectedId && centerTab === "analytics" && (
@@ -817,19 +763,17 @@ function MainApp() {
                       <AnalyticsContent sessionId={selectedId} />
                     </Box>
                   )}
-                  {!selectedId && (
-                    <Typography p={2.5} fontSize={13} color="text.secondary">
-                      Start a session to see output here.
-                    </Typography>
-                  )}
+                  {!selectedId && <Typography p={2.5} fontSize={13} color="text.secondary">Start a session to see output here.</Typography>}
                 </Box>
               </Box>
             </Box>
           ) : leftTab === "dashboard" ? (
             <DashboardContent />
+          ) : leftTab === "ai_coach" ? (
+            <AiCoachAnalyticsContent />
           ) : (
             /* Shell tab */
-            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
+            <Box sx={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, height: "100%" }}>
               {/* Shell creation form */}
               <Box
                 component="form"
@@ -900,7 +844,7 @@ function MainApp() {
               </Box>
 
               {/* Session header + terminal area */}
-              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0 }}>
+              <Box sx={{ display: "grid", gridTemplateRows: "auto auto 1fr", minHeight: 0, height: "100%" }}>
                 {/* Selected session info bar */}
                 {selected && (
                   <Box
@@ -993,7 +937,7 @@ function MainApp() {
                     bgcolor: "background.default",
                   }}
                 >
-                  {(["terminal", "logs", "artifacts", "analytics"] as CenterTab[]).map((tab) => (
+                  {(["terminal", "logs", "artifacts", ...(showsAnalyticsTab ? ["analytics"] : [])] as CenterTab[]).map((tab) => (
                     <Button
                       key={tab}
                       size="small"
@@ -1019,8 +963,8 @@ function MainApp() {
                   ))}
                 </Box>
 
-                {/* Terminal / logs / artifacts / analytics */}
-                <Box sx={{ minHeight: 0, overflow: "hidden" }}>
+                {/* Terminal / logs / artifacts */}
+                <Box sx={{ minHeight: 0, overflow: "hidden", height: "100%" }}>
                   {selectedId && centerTab === "terminal" && (
                     <TerminalPane sessionId={selectedId} ws={ws} active />
                   )}
@@ -1028,7 +972,7 @@ function MainApp() {
                     <TerminalReplay
                       sessionId={selectedId}
                       active
-                      freezeAtExit={selected?.command.trim().startsWith("claude")}
+                      freezeAtExit={!!selected?.command.trim().match(/(?:^|\]:)claude/)}
                     />
                   )}
                   {selectedId && centerTab === "artifacts" && (

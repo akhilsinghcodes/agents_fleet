@@ -6,7 +6,13 @@ import readline from "node:readline";
 import { getDb } from "../db";
 
 function getHeadroomLogPath(): string {
-  return path.resolve(process.cwd(), "..", "..", "data", "headroom-requests.jsonl");
+  return path.resolve(
+    process.cwd(),
+    "..",
+    "..",
+    "data",
+    "headroom-requests.jsonl",
+  );
 }
 
 function jsonError(res: Response, status: number, message: string) {
@@ -18,7 +24,8 @@ function parseDateRange(req: Request): { from: string; to: string } | null {
   if (typeof from !== "string" || typeof to !== "string") return null;
   const fromDate = new Date(from);
   const toDate = new Date(to);
-  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return null;
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()))
+    return null;
   // Normalize: from = start of day, to = end of day
   fromDate.setUTCHours(0, 0, 0, 0);
   toDate.setUTCHours(23, 59, 59, 999);
@@ -34,12 +41,18 @@ export function dashboardRouter(): Router {
    */
   router.get("/dashboard/stats", (req: Request, res: Response) => {
     const range = parseDateRange(req);
-    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+    if (!range)
+      return jsonError(
+        res,
+        400,
+        "from and to query params required (YYYY-MM-DD)",
+      );
 
     const db = getDb();
 
-    const totals = db.prepare(
-      `SELECT
+    const totals = db
+      .prepare(
+        `SELECT
         COUNT(*)                         AS total_sessions,
         COALESCE(SUM(estimated_input_tokens),  0) AS total_input_tokens,
         COALESCE(SUM(estimated_output_tokens), 0) AS total_output_tokens,
@@ -47,7 +60,8 @@ export function dashboardRouter(): Router {
       FROM sessions
       WHERE created_at BETWEEN ? AND ?
         AND command NOT IN ('zsh', 'bash')`,
-    ).get(range.from, range.to) as {
+      )
+      .get(range.from, range.to) as {
       total_sessions: number;
       total_input_tokens: number;
       total_output_tokens: number;
@@ -58,11 +72,16 @@ export function dashboardRouter(): Router {
     const WEEKLY_BUDGET_USD = 200;
     const fromMs = new Date(range.from).getTime();
     const toMs = new Date(range.to).getTime();
-    const daysDiff = Math.max(1, Math.ceil((toMs - fromMs) / (1000 * 60 * 60 * 24)));
-    const periodBudget = Math.round((WEEKLY_BUDGET_USD / 7) * daysDiff * 100) / 100;
+    const daysDiff = Math.max(
+      1,
+      Math.ceil((toMs - fromMs) / (1000 * 60 * 60 * 24)),
+    );
+    const periodBudget =
+      Math.round((WEEKLY_BUDGET_USD / 7) * daysDiff * 100) / 100;
 
-    const byCommand = db.prepare(
-      `SELECT
+    const byCommand = db
+      .prepare(
+        `SELECT
         command,
         COUNT(*)                              AS session_count,
         COALESCE(SUM(estimated_cost_usd), 0)  AS total_cost,
@@ -76,7 +95,8 @@ export function dashboardRouter(): Router {
         AND command NOT IN ('zsh', 'bash')
       GROUP BY command
       ORDER BY total_cost DESC`,
-    ).all(range.from, range.to) as Array<{
+      )
+      .all(range.from, range.to) as Array<{
       command: string;
       session_count: number;
       total_cost: number;
@@ -109,12 +129,18 @@ export function dashboardRouter(): Router {
    */
   router.get("/dashboard/sessions/by-repo", (req: Request, res: Response) => {
     const range = parseDateRange(req);
-    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+    if (!range)
+      return jsonError(
+        res,
+        400,
+        "from and to query params required (YYYY-MM-DD)",
+      );
 
     const db = getDb();
 
-    const repoStats = db.prepare(
-      `SELECT
+    const repoStats = db
+      .prepare(
+        `SELECT
         repo_path,
         COUNT(*)                              AS session_count,
         COALESCE(SUM(estimated_cost_usd), 0)  AS total_cost,
@@ -125,7 +151,8 @@ export function dashboardRouter(): Router {
         AND command NOT IN ('zsh', 'bash')
       GROUP BY repo_path
       ORDER BY total_cost DESC`,
-    ).all(range.from, range.to) as Array<{
+      )
+      .all(range.from, range.to) as Array<{
       repo_path: string;
       session_count: number;
       total_cost: number;
@@ -170,14 +197,22 @@ export function dashboardRouter(): Router {
    * GET /api/dashboard/sessions/by-command?from=YYYY-MM-DD&to=YYYY-MM-DD
    * Commands ranked by cost.
    */
-  router.get("/dashboard/sessions/by-command", (req: Request, res: Response) => {
-    const range = parseDateRange(req);
-    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+  router.get(
+    "/dashboard/sessions/by-command",
+    (req: Request, res: Response) => {
+      const range = parseDateRange(req);
+      if (!range)
+        return jsonError(
+          res,
+          400,
+          "from and to query params required (YYYY-MM-DD)",
+        );
 
-    const db = getDb();
+      const db = getDb();
 
-    const commands = db.prepare(
-      `SELECT
+      const commands = db
+        .prepare(
+          `SELECT
         command,
         COUNT(*)                              AS session_count,
         COALESCE(SUM(estimated_cost_usd), 0)  AS total_cost,
@@ -191,19 +226,21 @@ export function dashboardRouter(): Router {
         AND command NOT IN ('zsh', 'bash')
       GROUP BY command
       ORDER BY total_cost DESC`,
-    ).all(range.from, range.to) as Array<{
-      command: string;
-      session_count: number;
-      total_cost: number;
-      total_input_tokens: number;
-      total_output_tokens: number;
-      avg_cost: number;
-      min_cost: number;
-      max_cost: number;
-    }>;
+        )
+        .all(range.from, range.to) as Array<{
+        command: string;
+        session_count: number;
+        total_cost: number;
+        total_input_tokens: number;
+        total_output_tokens: number;
+        avg_cost: number;
+        min_cost: number;
+        max_cost: number;
+      }>;
 
-    return res.json({ commands });
-  });
+      return res.json({ commands });
+    },
+  );
 
   /**
    * GET /api/dashboard/sessions/by-model?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -212,14 +249,20 @@ export function dashboardRouter(): Router {
    */
   router.get("/dashboard/sessions/by-model", (req: Request, res: Response) => {
     const range = parseDateRange(req);
-    if (!range) return jsonError(res, 400, "from and to query params required (YYYY-MM-DD)");
+    if (!range)
+      return jsonError(
+        res,
+        400,
+        "from and to query params required (YYYY-MM-DD)",
+      );
 
     const db = getDb();
 
     // For each session in range that has a config artifact, extract the model field.
     // We take the latest config artifact per session to handle model changes mid-session.
-    const modelRows = db.prepare(
-      `SELECT
+    const modelRows = db
+      .prepare(
+        `SELECT
         JSON_EXTRACT(sa.content, '$.model')   AS model,
         s.command,
         COUNT(DISTINCT s.id)                  AS session_count,
@@ -243,7 +286,8 @@ export function dashboardRouter(): Router {
         AND JSON_EXTRACT(sa.content, '$.model') IS NOT NULL
       GROUP BY JSON_EXTRACT(sa.content, '$.model'), s.command
       ORDER BY total_cost DESC`,
-    ).all(range.from, range.to) as Array<{
+      )
+      .all(range.from, range.to) as Array<{
       model: string;
       command: string;
       session_count: number;
@@ -280,11 +324,13 @@ export function dashboardRouter(): Router {
     weekEnd.setUTCHours(23, 59, 59, 999);
 
     // Total spend this week (all sessions combined)
-    const weekSpendRow = db.prepare(
-      `SELECT COALESCE(SUM(estimated_cost_usd), 0) AS total
+    const weekSpendRow = db
+      .prepare(
+        `SELECT COALESCE(SUM(estimated_cost_usd), 0) AS total
        FROM sessions WHERE created_at BETWEEN ? AND ?
          AND command NOT IN ('zsh', 'bash')`,
-    ).get(weekStart.toISOString(), weekEnd.toISOString()) as { total: number };
+      )
+      .get(weekStart.toISOString(), weekEnd.toISOString()) as { total: number };
     const weekSpend = weekSpendRow.total;
 
     // Today's day index (0=Mon … 6=Sun) to know how many days have elapsed
@@ -302,8 +348,9 @@ export function dashboardRouter(): Router {
           : null;
 
     // Daily spend for each day of the current week (for the bar chart)
-    const dailyRows = db.prepare(
-      `SELECT
+    const dailyRows = db
+      .prepare(
+        `SELECT
         DATE(created_at) AS day,
         COALESCE(SUM(estimated_cost_usd), 0) AS spend
        FROM sessions
@@ -311,7 +358,11 @@ export function dashboardRouter(): Router {
          AND command NOT IN ('zsh', 'bash')
        GROUP BY DATE(created_at)
        ORDER BY day ASC`,
-    ).all(weekStart.toISOString(), weekEnd.toISOString()) as Array<{ day: string; spend: number }>;
+      )
+      .all(weekStart.toISOString(), weekEnd.toISOString()) as Array<{
+      day: string;
+      spend: number;
+    }>;
 
     // Build a full Mon–Sun array, filling missing days with 0
     const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -352,126 +403,181 @@ export function dashboardRouter(): Router {
    * GET /api/dashboard/litellm/spend?from=YYYY-MM-DD&to=YYYY-MM-DD
    * Proxy to LiteLLM spend endpoints. Returns { configured: false } if env vars missing.
    */
-  router.get("/dashboard/litellm/spend", async (req: Request, res: Response) => {
-    const baseUrl = process.env.LITELLM_BASE_URL?.replace(/\/$/, "");
-    const apiKey = process.env.LITELLM_API_KEY;
+  router.get(
+    "/dashboard/litellm/spend",
+    async (req: Request, res: Response) => {
+      const baseUrl = process.env.LITELLM_BASE_URL?.replace(/\/$/, "");
+      const apiKey = process.env.LITELLM_API_KEY;
 
-    if (!baseUrl || !apiKey) {
-      return res.json({ configured: false });
-    }
+      if (!baseUrl || !apiKey) {
+        return res.json({ configured: false });
+      }
 
-    const { from, to } = req.query;
-    const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+      const { from, to } = req.query;
+      const headers = {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      };
 
-    try {
-      // /spend/logs returns array of daily objects: { startTime, spend, models: {model: cost} }
-      // /user/daily/activity returns { results: [{ date, metrics: { spend, prompt_tokens, ... } }] }
-      const [logsRes, activityRes] = await Promise.all([
-        fetch(`${baseUrl}/spend/logs?start_date=${from ?? ""}&end_date=${to ?? ""}`, { headers }),
-        fetch(`${baseUrl}/user/daily/activity?start_date=${from ?? ""}&end_date=${to ?? ""}`, { headers }),
-      ]);
+      try {
+        // /spend/logs returns array of daily objects: { startTime, spend, models: {model: cost} }
+        // /user/daily/activity returns { results: [{ date, metrics: { spend, prompt_tokens, ... } }] }
+        const [logsRes, activityRes] = await Promise.all([
+          fetch(
+            `${baseUrl}/spend/logs?start_date=${from ?? ""}&end_date=${to ?? ""}`,
+            { headers },
+          ),
+          fetch(
+            `${baseUrl}/user/daily/activity?start_date=${from ?? ""}&end_date=${to ?? ""}`,
+            { headers },
+          ),
+        ]);
 
-      const spendLogs = logsRes.ok ? await logsRes.json() : [];
-      const activityRaw = activityRes.ok ? await activityRes.json() : null;
+        const spendLogs = logsRes.ok ? await logsRes.json() : [];
+        const activityRaw = activityRes.ok ? await activityRes.json() : null;
 
-      return res.json({ configured: true, spendLogs, activity: activityRaw });
-    } catch (e) {
-      return res.status(502).json({ error: { message: `LiteLLM proxy error: ${String(e)}` } });
-    }
-  });
-
-  /**
-   * GET /api/dashboard/headroom/requests?limit=500
-   * Reads the headroom request log JSONL and returns parsed rows.
-   */
-  router.get("/dashboard/headroom/requests", async (_req: Request, res: Response) => {
-    const logPath = getHeadroomLogPath();
-    if (!fs.existsSync(logPath)) return res.json({ rows: [] });
-
-    const limit = Math.min(5000, Math.max(1, Number(_req.query.limit) || 500));
-    const rows: unknown[] = [];
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const rl = readline.createInterface({
-          input: fs.createReadStream(logPath, { encoding: "utf8" }),
-          crlfDelay: Infinity,
-        });
-        rl.on("line", (line) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          try { rows.push(JSON.parse(trimmed)); } catch { /* skip malformed */ }
-        });
-        rl.on("close", resolve);
-        rl.on("error", reject);
-      });
-      // Return most-recent rows first, capped at limit
-      return res.json({ rows: rows.slice(-limit).reverse() });
-    } catch (e) {
-      return res.status(500).json({ error: { message: `Failed to read log: ${String(e)}` } });
-    }
-  });
+        return res.json({ configured: true, spendLogs, activity: activityRaw });
+      } catch (e) {
+        return res
+          .status(502)
+          .json({ error: { message: `LiteLLM proxy error: ${String(e)}` } });
+      }
+    },
+  );
 
   /**
    * GET /api/dashboard/headroom/stats?url=<proxyUrl>
    * Proxies to {url}/health on the local headroom proxy and returns its stats.
    * Returns { configured: false } if no url provided.
    */
-  router.get("/dashboard/headroom/stats", async (req: Request, res: Response) => {
-    const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
-    if (!url) return res.json({ configured: false });
+  router.get(
+    "/dashboard/headroom/stats",
+    async (req: Request, res: Response) => {
+      const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
+      if (!url) return res.json({ configured: false });
 
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({ error: { message: "Invalid headroom proxy URL" } });
-    }
-
-    try {
-      const base = url.replace(/\/$/, "");
-      const [healthRes, statsRes] = await Promise.all([
-        fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) }),
-        fetch(`${base}/stats`, { signal: AbortSignal.timeout(3000) }),
-      ]);
-      if (!healthRes.ok) {
-        return res.status(502).json({ error: { message: `Headroom proxy returned ${healthRes.status}` } });
+      try {
+        new URL(url);
+      } catch {
+        return res
+          .status(400)
+          .json({ error: { message: "Invalid headroom proxy URL" } });
       }
-      const health = await healthRes.json() as Record<string, unknown>;
-      const stats = statsRes.ok ? await statsRes.json() as Record<string, unknown> : {};
-      return res.json({ configured: true, health, stats });
-    } catch (e) {
-      return res.status(502).json({ error: { message: `Could not reach headroom proxy: ${String(e)}` } });
-    }
-  });
+
+      try {
+        const base = url.replace(/\/$/, "");
+        const [healthRes, statsRes] = await Promise.all([
+          fetch(`${base}/health`, { signal: AbortSignal.timeout(3000) }),
+          fetch(`${base}/stats`, { signal: AbortSignal.timeout(3000) }),
+        ]);
+        if (!healthRes.ok) {
+          return res
+            .status(502)
+            .json({
+              error: { message: `Headroom proxy returned ${healthRes.status}` },
+            });
+        }
+        const health = (await healthRes.json()) as Record<string, unknown>;
+        const stats = statsRes.ok
+          ? ((await statsRes.json()) as Record<string, unknown>)
+          : {};
+        return res.json({ configured: true, health, stats });
+      } catch (e) {
+        return res
+          .status(502)
+          .json({
+            error: { message: `Could not reach headroom proxy: ${String(e)}` },
+          });
+      }
+    },
+  );
+
+  /**
+   * GET /api/dashboard/headroom/requests?limit=500
+   * Reads per-request data from data/headroom-requests.jsonl written by the --log-file flag.
+   */
+  router.get(
+    "/dashboard/headroom/requests",
+    async (_req: Request, res: Response) => {
+      const logPath = getHeadroomLogPath();
+      if (!fs.existsSync(logPath)) return res.json({ rows: [] });
+
+      const limit = Math.min(
+        5000,
+        Math.max(1, Number(_req.query.limit) || 500),
+      );
+      const rows: unknown[] = [];
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const rl = readline.createInterface({
+            input: fs.createReadStream(logPath, { encoding: "utf8" }),
+            crlfDelay: Infinity,
+          });
+          rl.on("line", (line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            try {
+              rows.push(JSON.parse(trimmed));
+            } catch {
+              /* skip malformed */
+            }
+          });
+          rl.on("close", resolve);
+          rl.on("error", reject);
+        });
+        return res.json({ rows: rows.slice(-limit).reverse() });
+      } catch (e) {
+        return res
+          .status(500)
+          .json({ error: { message: `Failed to read log: ${String(e)}` } });
+      }
+    },
+  );
 
   /**
    * GET /api/dashboard/headroom/quota?url=<proxyUrl>
    * Proxies to {url}/subscription-window and {url}/quota on the local headroom
    * proxy. Returns { configured: false } if no url provided.
    */
-  router.get("/dashboard/headroom/quota", async (req: Request, res: Response) => {
-    const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
-    if (!url) return res.json({ configured: false });
+  router.get(
+    "/dashboard/headroom/quota",
+    async (req: Request, res: Response) => {
+      const url = typeof req.query.url === "string" ? req.query.url.trim() : "";
+      if (!url) return res.json({ configured: false });
 
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({ error: { message: "Invalid headroom proxy URL" } });
-    }
+      try {
+        new URL(url);
+      } catch {
+        return res
+          .status(400)
+          .json({ error: { message: "Invalid headroom proxy URL" } });
+      }
 
-    try {
-      const base = url.replace(/\/$/, "");
-      const [subRes, quotaRes] = await Promise.all([
-        fetch(`${base}/subscription-window`, { signal: AbortSignal.timeout(3000) }),
-        fetch(`${base}/quota`, { signal: AbortSignal.timeout(3000) }),
-      ]);
-      const subscriptionWindow = subRes.ok ? await subRes.json() as Record<string, unknown> : null;
-      const quota = quotaRes.ok ? await quotaRes.json() as Record<string, unknown> : null;
-      return res.json({ configured: true, subscriptionWindow, quota });
-    } catch (e) {
-      return res.status(502).json({ error: { message: `Could not reach headroom proxy: ${String(e)}` } });
-    }
-  });
+      try {
+        const base = url.replace(/\/$/, "");
+        const [subRes, quotaRes] = await Promise.all([
+          fetch(`${base}/subscription-window`, {
+            signal: AbortSignal.timeout(3000),
+          }),
+          fetch(`${base}/quota`, { signal: AbortSignal.timeout(3000) }),
+        ]);
+        const subscriptionWindow = subRes.ok
+          ? ((await subRes.json()) as Record<string, unknown>)
+          : null;
+        const quota = quotaRes.ok
+          ? ((await quotaRes.json()) as Record<string, unknown>)
+          : null;
+        return res.json({ configured: true, subscriptionWindow, quota });
+      } catch (e) {
+        return res
+          .status(502)
+          .json({
+            error: { message: `Could not reach headroom proxy: ${String(e)}` },
+          });
+      }
+    },
+  );
 
   /**
    * GET /api/dashboard/headroom/snapshots?limit=200
@@ -485,29 +591,96 @@ export function dashboardRouter(): Router {
     const rows = db
       .prepare(
         `SELECT id, created_at, subscription_window, quota, stats
-         FROM headroom_snapshots
-         ORDER BY created_at DESC
-         LIMIT ?`,
+           FROM headroom_snapshots
+           ORDER BY created_at DESC
+           LIMIT ?`,
       )
       .all(limit) as Array<{
-        id: string;
-        created_at: string;
-        subscription_window: string | null;
-        quota: string | null;
-        stats: string | null;
-      }>;
+      id: string;
+      created_at: string;
+      subscription_window: string | null;
+      quota: string | null;
+      stats: string | null;
+    }>;
 
     const snapshots = rows
       .map((r) => ({
         id: r.id,
         createdAt: r.created_at,
-        subscriptionWindow: r.subscription_window ? JSON.parse(r.subscription_window) as unknown : null,
-        quota: r.quota ? JSON.parse(r.quota) as unknown : null,
-        stats: r.stats ? JSON.parse(r.stats) as unknown : null,
+        subscriptionWindow: r.subscription_window
+          ? (JSON.parse(r.subscription_window) as unknown)
+          : null,
+        quota: r.quota ? (JSON.parse(r.quota) as unknown) : null,
+        stats: r.stats ? (JSON.parse(r.stats) as unknown) : null,
       }))
       .reverse();
 
     return res.json({ snapshots });
+  });
+
+  // Compression savings multipliers per level (estimated baseline = measured / (1 - reduction_rate))
+  const CAVEMAN_SAVINGS_RATE: Record<string, number> = {
+    lite: 0.4,
+    full: 0.75,
+    ultra: 0.85,
+    wenyan: 0.9,
+  };
+
+  router.get("/dashboard/caveman/stats", (req, res) => {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT
+           caveman_level,
+           COUNT(*) AS session_count,
+           SUM(estimated_output_tokens) AS total_output_tokens,
+           SUM(estimated_cost_usd) AS total_cost
+         FROM sessions
+         WHERE caveman_level IS NOT NULL
+         GROUP BY caveman_level
+         ORDER BY session_count DESC`,
+      )
+      .all() as Array<{
+      caveman_level: string;
+      session_count: number;
+      total_output_tokens: number;
+      total_cost: number;
+    }>;
+
+    const byLevel = rows.map((r) => {
+      const rate = CAVEMAN_SAVINGS_RATE[r.caveman_level] ?? 0.75;
+      const tokensWithCaveman = r.total_output_tokens ?? 0;
+      // Tokens without caveman would have been: measured / (1 - rate)
+      const tokensWithout =
+        rate < 1 ? tokensWithCaveman / (1 - rate) : tokensWithCaveman;
+      const tokensSaved = Math.round(tokensWithout - tokensWithCaveman);
+      return {
+        level: r.caveman_level,
+        session_count: r.session_count,
+        total_output_tokens: tokensWithCaveman,
+        total_cost: r.total_cost ?? 0,
+        tokens_saved_estimate: tokensSaved,
+        savings_rate: rate,
+      };
+    });
+
+    const totals = byLevel.reduce(
+      (acc, r) => ({
+        session_count: acc.session_count + r.session_count,
+        total_output_tokens: acc.total_output_tokens + r.total_output_tokens,
+        total_cost: acc.total_cost + r.total_cost,
+        tokens_saved_estimate:
+          acc.tokens_saved_estimate + r.tokens_saved_estimate,
+      }),
+      {
+        session_count: 0,
+        total_output_tokens: 0,
+        total_cost: 0,
+        tokens_saved_estimate: 0,
+      },
+    );
+
+    return res.json({ by_level: byLevel, totals });
   });
 
   return router;

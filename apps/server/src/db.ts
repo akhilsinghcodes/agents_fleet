@@ -1,7 +1,7 @@
+import Database from "better-sqlite3";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
 
 type Db = Database.Database;
 
@@ -157,6 +157,7 @@ export function getDb(): Db {
     "budget_exceeded_at TEXT NULL",
   );
   ensureColumn(db, "sessions", "stop_reason", "stop_reason TEXT NULL");
+  ensureColumn(db, "sessions", "caveman_level", "caveman_level TEXT NULL");
   ensureColumn(db, "session_analytics", "group_scores", "group_scores TEXT NULL");
 
   dbSingleton = db;
@@ -164,6 +165,14 @@ export function getDb(): Db {
 }
 
 export async function bootstrapDb(): Promise<void> {
+  // One-time migration: rename legacy DB file from agents_fleet to agents_fleet.
+  const legacyPath = path.join(path.dirname(getDbPath()), "agents_fleet.sqlite");
+  const newPath = getDbPath();
+  if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
+    fs.renameSync(legacyPath, newPath);
+    console.log("[db] Migrated agents_fleet.sqlite → agents_fleet.sqlite");
+  }
+
   const db = getDb();
 
   // Recover orphaned sessions: any session still marked 'running' at startup

@@ -67,24 +67,27 @@ KOMPRESS_CACHE="$HF_CACHE_DIR/models--chopratejas--kompress-v2-base"
 ensure_kompress_model() {
   if [ -d "$KOMPRESS_CACHE" ]; then
     echo "[agents_fleet] kompress-v2-base model already cached -- enabling HF_HUB_OFFLINE"
-    export HF_HUB_OFFLINE=1
-    return
-  fi
+       export HF_HUB_OFFLINE=1
+       return
+     fi
 
-  echo "[agents_fleet] kompress-v2-base model not found in cache -- downloading from HuggingFace (one-time, ~260MB)..."
-  # The proxy itself only loads Kompress lazily on the first compressible
-  # request (it never eager-loads at startup), so without this step the
-  # model would silently never download until real traffic happened to
-  # trigger it. Fetch it directly via headroom's own loader so it's ready
-  # before the proxy starts.
-  if "$REPO_ROOT/.venv/bin/python" -c "
-from headroom.transforms.kompress_compressor import _load_kompress
-_load_kompress(allow_download=True)
-" >/dev/null 2>&1; then
-    echo "[agents_fleet] kompress-v2-base model downloaded and cached."
+     echo "[agents_fleet] kompress-v2-base model not found in cache -- downloading from HuggingFace (one-time, ~260MB)..."
+     # The proxy itself only loads Kompress lazily on the first compressible
+     # request (it never eager-loads at startup), so without this step the
+     # model would silently never download until real traffic happened to
+     # trigger it. Fetch it directly via headroom's own loader so it's ready
+     # before the proxy starts.
+     if "$REPO_ROOT/.venv/bin/python" -c "
+   from headroom.transforms.kompress_compressor import _load_kompress
+   _load_kompress(allow_download=True)
+   " >/dev/null 2>&1; then
+       echo "[agents_fleet] kompress-v2-base model downloaded and cached."
     export HF_HUB_OFFLINE=1
   else
-    echo "[agents_fleet] WARNING: could not pre-download kompress-v2-base model; it will be fetched lazily on first compressible request instead."
+    echo "[agents_fleet] kompress-v2-base model not found in cache -- downloading from HuggingFace (one-time)..."
+    # headroom downloads the model on first proxy start; just let it run online this once.
+    # HF_HUB_OFFLINE stays unset so the download succeeds.
+    echo "[agents_fleet] Future runs will use the local cache (no HuggingFace calls)."
   fi
 }
 
@@ -270,6 +273,36 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 start_headroom
+
+# -- Caveman (optional) -------------------------------------------------------
+_ask_yn() {
+  printf "%s" "$1"
+  if [ -r /dev/tty ]; then
+    read -r _yn </dev/tty || _yn="n"
+  else
+    read -r _yn || _yn="n"
+  fi
+  case "$_yn" in [nN]*) return 1 ;; *) return 0 ;; esac
+}
+
+_caveman_installed() {
+  grep -q '"caveman@caveman"' "${HOME}/.claude/plugins/installed_plugins.json" 2>/dev/null
+}
+
+if ! _caveman_installed; then
+  if _ask_yn "[agents_fleet] caveman not found. Install it now for compressed AI output? [Y/n]: "; then
+    echo "[agents_fleet] Installing caveman for Claude Code..."
+    if curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash; then
+      echo "[agents_fleet] caveman installed for Claude Code"
+    else
+      echo "[agents_fleet] WARNING: caveman install failed -- Caveman compression levels will not work in Headroom Shell"
+    fi
+  else
+    echo "[agents_fleet] Skipping caveman setup"
+  fi
+fi
+
+
 
 echo "[agents_fleet] Starting dev (server + web)..."
 pnpm dev

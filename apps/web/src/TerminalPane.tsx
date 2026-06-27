@@ -6,6 +6,7 @@ function parseClaudeStatuslineFromRenderedRow(rowText: string): {
   inputTokens: number;
   outputTokens: number;
   costUsd?: number;
+  ctxPct?: number;
 } | null {
   // Only trust our AF-tagged status line to avoid accidentally matching other output.
   // Supported formats:
@@ -28,7 +29,9 @@ function parseClaudeStatuslineFromRenderedRow(rowText: string): {
     if (!Number.isFinite(costUsd) || costUsd < 0) return null;
     if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
     if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
-    return { inputTokens, outputTokens, costUsd };
+    const ctxMatch = rowText.match(/\[AF\][\s\S]*?ctx=\d+\/\d+\((\d+)%\)/i);
+    const ctxPct = ctxMatch ? Number(ctxMatch[1]) : undefined;
+    return { inputTokens, outputTokens, costUsd, ctxPct };
   }
 
   // Pipe-delimited format emitted by newer Claude Code builds:
@@ -37,15 +40,17 @@ function parseClaudeStatuslineFromRenderedRow(rowText: string): {
     const inM = rowText.match(/\bAF\|.*?\bin=(\d+)/i);
     const outM = rowText.match(/\bAF\|.*?\bout=(\d+)/i);
     const costM = rowText.match(/\bAF\|.*?\bcost=\$?([0-9]+(?:\.[0-9]+)?)/i);
+    const ctxM = rowText.match(/\bAF\|.*?ctx=\d+\/\d+\((\d+)%\)/i);
     if (inM && outM) {
       const inputTokens = Number(inM[1]);
       const outputTokens = Number(outM[1]);
       const costUsd = costM ? Number(costM[1]) : undefined;
+      const ctxPct = ctxM ? Number(ctxM[1]) : undefined;
       if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
       if (!Number.isFinite(outputTokens) || outputTokens < 0) return null;
       if (costUsd !== undefined && (!Number.isFinite(costUsd) || costUsd < 0))
         return null;
-      return { inputTokens, outputTokens, costUsd };
+      return { inputTokens, outputTokens, costUsd, ctxPct };
     }
   }
 
@@ -63,7 +68,10 @@ function parseClaudeStatuslineFromRenderedRow(rowText: string): {
   if (costUsd !== undefined && (!Number.isFinite(costUsd) || costUsd < 0))
     return null;
 
-  return { inputTokens, outputTokens, costUsd };
+  const ctxMatch = rowText.match(/\[AF\][\s\S]*?ctx=\d+\/\d+\((\d+)%\)/i);
+  const ctxPct = ctxMatch ? Number(ctxMatch[1]) : undefined;
+
+  return { inputTokens, outputTokens, costUsd, ctxPct };
 }
 
 type Props = {
@@ -202,6 +210,7 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
 
     let lastSent: { inTok: number; outTok: number; cost?: number } | null =
       null;
+    let lastCtxPct: number | null = null;
 
     const interval = window.setInterval(() => {
       const t = termRef.current;
@@ -220,7 +229,9 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
         inputTokens: number;
         outputTokens: number;
         costUsd?: number;
+        ctxPct?: number;
       } | null = null;
+
       for (let row = end; row >= start; row--) {
         const line = buf.getLine(row);
         const text = line ? line.translateToString(true) : "";
@@ -242,9 +253,11 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
           }
         }
       }
+
       if (!best) return;
 
       const parsed = best;
+      const ctxPct = parsed.ctxPct ?? null;
 
       // Only send if it changed.
       if (
@@ -253,6 +266,15 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
         lastSent.outTok === parsed.outputTokens &&
         lastSent.cost === parsed.costUsd
       ) {
+        // Still check ctxPct even if usage didn't change
+        if (ctxPct !== lastCtxPct) {
+          lastCtxPct = ctxPct;
+          window.dispatchEvent(
+            new CustomEvent("agents_fleet:ctx_pct", {
+              detail: { sessionId, ctxPct },
+            })
+          );
+        }
         return;
       }
       lastSent = {
@@ -260,6 +282,15 @@ export default function TerminalPane({ sessionId, ws, active }: Props) {
         outTok: parsed.outputTokens,
         cost: parsed.costUsd,
       };
+
+      if (ctxPct !== lastCtxPct) {
+        lastCtxPct = ctxPct;
+        window.dispatchEvent(
+          new CustomEvent("agents_fleet:ctx_pct", {
+            detail: { sessionId, ctxPct },
+          })
+        );
+      }
 
       s.send(
         JSON.stringify({
