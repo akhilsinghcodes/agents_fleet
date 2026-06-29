@@ -1,6 +1,6 @@
 # Agents Fleet
 
-[![CI](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml)
+[![CI]([https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml/badge.svg)](https://github.com/akhilsinghcodes/agents_fleet/actions/workflows/ci.yml)
 
 AI coding agents like Claude Code and Codex are powerful, but they have no built-in cost controls—one runaway session can silently burn $20–$50 with no visibility into what’s happening or when to stop. Agents Fleet gives you a local web UI to launch and monitor agent sessions and automatically stop them when they hit a token or USD budget.
 
@@ -11,18 +11,23 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
 ![AgentFleet: Stop Runaway AI Agents with Local Mission Control](screenshots/AgentFleet_Local_AI_Mission_Control.png)
 
 ## ✨ Recently Shipped
-- **AI Coach analytics** (latest)
-  - New **Analytics** tab: per-session practice scorecards across 4 categories — Prompt Quality, Session Hygiene, Code Review, Tool Mastery — rendered as circular gauges with real WoW/MoM trend chips and sparklines (computed from the repo's own session history, not stubbed)
-  - 45 built-in detection rules (ported from [AI Engineering Coach](https://github.com/microsoft/AI-Engineering-Coach)) flag anti-patterns like runaway agent loops, late-night coding, lazy prompting, auto-model avoidance — each with severity, occurrence count, a concrete suggestion, and expandable real examples
-  - Parses your own `~/.claude/projects` or `~/.codex` logs and scopes them to the exact AgentFleet session window — no duplicate/global stats
-  - Backfillable: `pnpm --filter @agents_fleet/server exec tsx scripts/backfill-analytics.ts` analyzes any historical stopped sessions that predate this feature
-  - New **AI Coach Analytics** tab: cross-session dashboard over a date range, across 6 sub-tabs — Dashboard (avg practice score, per-category trends, top anti-patterns, daily activity, harness mix, token output/burndown), Patterns (hour×weekday activity heatmap, session calendar, per-repo breakdown), Timeline, SDLC work-type split, Skill Finder (underused harness features), and Context Health (AGENTS.md/file-context/devcontainer gaps)
-  - Full breakdown: [AI_COACH.md](AI_COACH.md)
-- **AI session summary** (latest)
-  - One-click plain-English summary of any session — title, what the agent did, and token/cost breakdown for the summary call
-  - Powered by `gpt-4o-mini` via your LiteLLM proxy — under $0.001 per summary
-  - Summary persisted in SQLite and surfaced as a top-level artifact alongside git diff
-  - Generated session title appears in the sessions sidebar for quick scanning
+- **Context % indicator in session header** (latest)
+  - Live colored chip in the top info bar showing Claude Code's session context window usage
+  - Green <70%, amber 70-89%, red ≥90% — at a glance warning when context is running low
+  - Extracts `ctxPct` from AF statusline `ctx=IN/SIZE(PCT%)` pattern — always available, updates every 500ms (same polling as token updates)
+  - No server changes, no DB migration — pure client-side event dispatch
+- **Caveman compression in Headroom Shell**
+  - Caveman level dropdown (Off / Lite / Full / Ultra / Wenyan) in the Headroom Shell session form
+  - Selected level is appended as `--append-system-prompt` to the `claude` command, activating the caveman plugin for that session
+  - **Spend Analytics → Caveman tab**: sessions, output tokens, estimated tokens saved, and cost broken down by compression level; savings rates: Lite 75%, Full 75%, Ultra 85%, Wenyan 90%
+  - Resume sessions (claude --resume / codex resume) now correctly track delta tokens/cost instead of cumulative history
+- **AI Coach Analytics** (latest)
+  - New **Analytics** tab (next to Artifacts) on Shell and Headroom Shell sessions — shows a 4-category practice scorecard (Prompt Quality, Session Hygiene, Code Review, Tool Mastery) plus detected anti-patterns with suggestions
+  - Powered by 45 detection rules ported from [microsoft/AI-Engineering-Coach](https://github.com/microsoft/AI-Engineering-Coach), all running locally — no telemetry, no network calls
+  - Parses Claude/Codex log files off disk (`~/.claude/projects`, `~/.codex`) and scopes them to the exact session time window
+  - Results persisted in a new additive `session_analytics` table — zero impact on existing budget/replay features
+  - Historical sessions backfillable: `pnpm --filter @agents_fleet/server exec tsx scripts/backfill-analytics.ts`
+  - See [AI_COACH.md](AI_COACH.md) for the full rule catalogue and scoring formula
 - **Headroom integration**
   - New **Headroom** tab: LiteLLM chat with transparent context compression via the headroom proxy — same model/budget controls as LiteLLM, compression is automatic
   - ~19% token reduction observed on first real session (948 tokens saved out of 4,901 input)
@@ -31,6 +36,15 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
   - Telemetry disabled (`HEADROOM_TELEMETRY=off`), HuggingFace offline after first model download (`HF_HUB_OFFLINE=1`)
   - **Spend Analytics → Headroom tab**: lifetime + per-session compression stats (tokens saved, savings %, cost saved) pulled from the proxy's `/stats` endpoint — persists across restarts via `~/.headroom/proxy_savings.json`
   - Sessions tagged with purple **Headroom** chip in sidebar, distinguished from regular LiteLLM sessions
+- **AI session summary** (latest)
+  - One-click plain-English summary of any session — title, what the agent did, and token/cost breakdown for the summary call
+  - Powered by `gpt-4.1-nano` via your LiteLLM proxy — under $0.001 per summary
+  - Summary persisted in SQLite and surfaced as a top-level artifact alongside git diff
+  - Generated session title appears in the sessions sidebar for quick scanning
+- **Side-by-side git diff viewer**
+  - File tabs at the top — click to switch files without scrolling
+  - Side-by-side split with red/green highlighting and line numbers
+  - Replaces the raw diff `<pre>` block in the Artifacts tab
 - **LiteLLM Spend Analytics tab**
   - Real spend data pulled from your LiteLLM proxy (`/spend/logs`, `/user/daily/activity`)
   - Matches Agents Fleet layout: header stats, This Week chart, Weekly Budget strip, By Model and Daily tabs
@@ -56,6 +70,10 @@ Local-first “mission control” for AI coding agent CLIs (and any shell comman
   - Display token budgets (input + output combined) and USD budgets side-by-side with current usage
   - Shows on all tabs: Shell, Claude (SDK), LiteLLM
   - Example: `total 81,772 / 100,000  budget $1.23 / $5.00`
+
+### Context % Indicator Examples
+![Context Percentage Indicator at 2%](screenshots/Context_Percentage_Indicator_2_Percent.png)
+![Context Usage at 100%](screenshots/Context_Usage_Full_100_Percent.png)
 This repository contains a **working MVP**:
 - pnpm workspace monorepo
 - React + Vite + TypeScript “Mission Control” web app
@@ -275,7 +293,8 @@ The MVP persists several tables in `data/agents_fleet.sqlite`:
 - `pty_chunks`: raw PTY stream (ANSI included) used for **Terminal (persisted)** replay
 - `stdin_events`: input audit trail (stored separately; not injected into replay)
 - `session_markers`: lifecycle markers like `stop_requested`, `budget_exceeded`, `process_exit`
-- `session_artifacts`: per-session artifacts — git snapshot (`changedFiles[]` + diff captured on stop/exit), session resume command, and AI-generated summary (title + description via gpt-4o-mini)
+- `session_artifacts`: per-session artifacts — git snapshot (`changedFiles[]` + diff captured on stop/exit), session resume command, and AI-generated summary (title + description via gpt-4.1-nano)
+- `session_analytics`: practice score + anti-patterns + per-category group scores — backs the **Analytics** tab, additive and independent from budget/replay data
 
 > Earlier iterations used a line-based `logs` table. The current design persists terminal history as raw PTY chunks (`pty_chunks`) for xterm.js replay, which is much closer to real scrollback (especially for TUIs like Claude/Codex).
 
@@ -353,17 +372,24 @@ For the most reliable budget tracking in Agents Fleet, configure a **single-line
 #!/bin/bash
 input=$(cat)
 
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+COST_FMT=$(printf '%.6f' "$COST")
+TRANSCRIPT=$(echo "$input" | jq -r '.transcript_path // empty')
+
+IN=0
+OUT=0
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  read IN OUT < <(jq -rs '
+    [.[] | .message.usage // empty] as $u
+    | "\(($u | map((.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)) | add // 0)) \(($u | map(.output_tokens // 0) | add // 0))"
+  ' "$TRANSCRIPT" 2>/dev/null)
+fi
+
 CTX_IN=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
-CTX_OUT=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 CTX_SIZE=$(echo "$input" | jq -r '.context_window.context_window_size // 0')
 CTX_PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 
-COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-COST_FMT=$(printf '$%.6f' "$COST")
-
-# Single-line, parse-friendly output:
-# Use a unique prefix + delimiter to make parsing reliable even with TUI redraws.
-echo "AF|ctx=${CTX_IN}/${CTX_SIZE}(${CTX_PCT}%)|in=${CTX_IN}|out=${CTX_OUT}|cost=${COST_FMT}"
+echo "[AF] ctx=${CTX_IN}/${CTX_SIZE}(${CTX_PCT}%) in=${IN:-0} out=${OUT:-0} cost=\$${COST_FMT} [/AF]"
 ```
 Save it as `~/.claude/agents_fleet_statusline.sh` and make it executable:
 ```bash
@@ -385,6 +411,7 @@ chmod +x ~/.claude/agents_fleet_statusline.sh
 Notes:
 - Requires `jq` to be installed (`brew install jq` on macOS).
 - `cost.total_cost_usd` is an estimate computed client-side by Claude Code and may differ from your actual bill.
+- The `ctx=IN/SIZE(PCT%)` field in the AF statusline powers the **Context % indicator** chip in the session header — green <70%, amber 70-89%, red ≥90%.
 - Type directly into the **Terminal (live)** pane (xterm.js).
 - Use **Terminal (persisted)** to replay and scroll through the recorded PTY output (xterm.js replay).
 
